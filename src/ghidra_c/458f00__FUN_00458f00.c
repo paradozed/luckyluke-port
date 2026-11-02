@@ -1,0 +1,154 @@
+/* FUN_00458f00 @ 00458f00 */
+/* decompiled from Lucky.exe (Game.run) */
+
+
+/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */
+
+void FUN_00458f00(void)
+
+{
+  int iVar1;
+  undefined4 *puVar2;
+  undefined4 local_44 [15];
+  undefined4 uStack_8;
+  
+  puVar2 = local_44;
+  for (iVar1 = 0x10; iVar1 != 0; iVar1 = iVar1 + -1) {
+    *puVar2 = 0xcccccccc;
+    puVar2 = puVar2 + 1;
+  }
+  FUN_00459440();
+  _DAT_004f2880 = "Lucky Release Jan 24 2000 20:48:25";
+  _DAT_004f2884 = 0x4000;
+  _DAT_004f2888 = FUN_004598d0;
+  _DAT_004f2a50 = "LEVEL";
+  _DAT_004f2a54 = 0x4000;
+  _DAT_004f2a58 = FUN_0045d580;
+  _DAT_004f2820 = "Cheat powered by Liop";
+  _DAT_004f2824 = 0x4000;
+  _DAT_004f2828 = FUN_004599c0;
+  _DAT_004f2a20 = "COL TYPE";
+  _DAT_004f2a24 = 0x4000;
+  _DAT_004f2a28 = FUN_00459a80;
+  _DAT_004f2950 = "VIDEO";
+  _DAT_004f2954 = 0x4000;
+  _DAT_004f2958 = FUN_00459ba0;
+  _DAT_004f28b0 = &DAT_004b7db8;
+  _DAT_004f28b4 = 0x4000;
+  _DAT_004f28b8 = FUN_00459830;
+  _DAT_004f2900 = "VIEW VBL";
+  _DAT_004f2904 = 0x4000;
+  _DAT_004f2908 = FUN_0045a470;
+  _DAT_004f2ab0 = "PERSO";
+  _DAT_004f2ab4 = 0x4000;
+  _DAT_004f2ab8 = FUN_0045a4e0;
+  _DAT_004f2860 = "VIEW BOX";
+  _DAT_004f2864 = 0x4000;
+  _DAT_004f2868 = FUN_0045a550;
+  _DAT_004f2810 = "WORLD";
+  _DAT_004f2814 = 0x4000;
+  _DAT_004f2818 = FUN_0045a5c0;
+  _DAT_004f29a0 = "CAMERA";
+  _DAT_004f29a4 = 0x4000;
+  _DAT_004f29a8 = FUN_0045c990;
+  _DAT_004f2a60 = &DAT_004b7d80;
+  _DAT_004f2a64 = 0x4000;
+  _DAT_004f2a68 = FUN_0045d3e0;
+  _DAT_004f28a0 = "BACKGROUND";
+  _DAT_004f28a4 = 0x4000;
+  _DAT_004f28a8 = FUN_0045da40;
+  _DAT_004f2aa0 = "RECORD";
+  _DAT_004f2aa4 = 0x4000;
+  _DAT_004f2aa8 = FUN_0045d750;
+  _DAT_004f2a80 = &DAT_004b33d4;
+  _DAT_004f2a84 = 0x800;
+  _DAT_004f2a88 = FUN_0045a170;
+  _DAT_004f2990 = &DAT_004b7d64;
+  _DAT_004f2994 = 0x4000;
+  _DAT_004f2998 = FUN_0045a1f0;
+  _DAT_004f2870 = &DAT_004b7d5c;
+  _DAT_004f2874 = 0x4000;
+  _DAT_004f2878 = FUN_00459ca0;
+  _DAT_004f28e0 = &DAT_004b7d54;
+  _DAT_004f28e4 = 0x4000;
+  _DAT_004f28e8 = FUN_00459c20;
+  _DAT_004f2940 = &DAT_004b33d4;
+  _DAT_004f2944 = 0x4000;
+  _DAT_004f2948 = FUN_00459d20;
+  _DAT_004f29f0 = "VIEW PAGE";
+  _DAT_004f29f4 = 0x4000;
+  _DAT_004f29f8 = FUN_0045cae0;
+  _DAT_004f29c0 = "CLUSTER";
+  _DAT_004f29c4 = 0x4000;
+  _DAT_004f29c8 = FUN_0045b390;
+  _DAT_004f2a40 = "Profile";
+  _DAT_004f2a44 = 0x4000;
+  _DAT_004f2a48 = FUN_0045a640;
+  _DAT_004f2a30 = "Draw Map";
+  _DAT_004f2a34 = 0x4000;
+  _DAT_004f2a38 = FUN_0045aae0;
+  _DAT_004f2850 = "Map Prior.";
+  _DAT_004f2854 = 0x4000;
+  _DAT_004f2858 = FUN_0045ad90;
+  _DAT_004f2960 = "Draw Box O";
+  _DAT_004f2964 = 0x4000;
+  _DAT_004f2968 = FUN_0045ae30;
+  _DAT_004f2980 = "Draw Box P";
+  _DAT_004f2984 = 0x4000;
+  _DAT_004f2988 = FUN_0045aec0;
+  _DAT_004f2910 = "Draw Object";
+  _DAT_004f2914 = 0x4000;
+  _DAT_004f2918 = FUN_0045af50;
+  _DAT_004f2ad0 = "Draw Perso";
+  _DAT_004f2ad4 = 0x4000;
+  _DAT_004f2ad8 = FUN_0045b020;
+  _DAT_004f2a00 = "List Cluster";
+  _DAT_004f2a04 = 0x4000;
+  _DAT_004f2a08 = FUN_0045b110;
+  _DAT_004f2840 = "List Object";
+  _DAT_004f2844 = 0x4000;
+  _DAT_004f2848 = FUN_0045b250;
+  _DAT_004f2970 = "Cluster";
+  _DAT_004f2974 = 0x4000;
+  _DAT_004f2978 = FUN_0045b410;
+  _DAT_004f28d0 = "Select Object";
+  _DAT_004f28d4 = 0x4000;
+  _DAT_004f28d8 = FUN_0045b770;
+  _DAT_004f2ae0 = "Select Perso";
+  _DAT_004f2ae4 = 0x4000;
+  _DAT_004f2ae8 = FUN_0045bfe0;
+  _DAT_004f29e0 = "Focal";
+  _DAT_004f29e4 = 0x4000;
+  _DAT_004f29e8 = FUN_0045ccb0;
+  _DAT_004f2a10 = "Control";
+  _DAT_004f2a14 = 0x4000;
+  _DAT_004f2a18 = FUN_0045cdd0;
+  _DAT_004f29b0 = &DAT_004b7c94;
+  _DAT_004f29b4 = 0x4000;
+  _DAT_004f29b8 = FUN_0045d310;
+  _DAT_004f2890 = "TIMER";
+  _DAT_004f2894 = 0x4000;
+  _DAT_004f2898 = FUN_0045d460;
+  _DAT_004f28f0 = "MODE COL";
+  _DAT_004f28f4 = 0x4000;
+  _DAT_004f28f8 = FUN_0045db80;
+  _DAT_004f29d0 = &DAT_004b7c78;
+  _DAT_004f29d4 = 0x4000;
+  _DAT_004f29d8 = FUN_0045d7a0;
+  _DAT_004f2b30 = "START";
+  _DAT_004f2b34 = 0x4000;
+  _DAT_004f2b38 = FUN_0045d8c0;
+  _DAT_004f2920 = "INVINCIBLE";
+  _DAT_004f2924 = 0x4000;
+  _DAT_004f2928 = FUN_0045de10;
+  _DAT_004f2a70 = "Friends";
+  _DAT_004f2a74 = 0x4000;
+  _DAT_004f2a78 = FUN_0045dee0;
+  _DAT_004f2a90 = "MANGA";
+  _DAT_004f2a94 = 0x4000;
+  _DAT_004f2a98 = FUN_0045df70;
+  uStack_8 = 0x459434;
+  __chkesp();
+  return;
+}
+

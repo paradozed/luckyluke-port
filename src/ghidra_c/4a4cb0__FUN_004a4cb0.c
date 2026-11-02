@@ -1,0 +1,41 @@
+/* FUN_004a4cb0 @ 004a4cb0 */
+/* decompiled from Lucky.exe (Game.run) */
+
+
+int __cdecl FUN_004a4cb0(undefined1 *param_1,int param_2,byte *param_3)
+
+{
+  code *pcVar1;
+  int iVar2;
+  undefined1 *local_24;
+  int local_20;
+  undefined1 *local_1c;
+  undefined4 local_18;
+  
+  if ((param_1 == (undefined1 *)0x0) &&
+     (iVar2 = FUN_004999a0(2,0x4baea0,0x5d,0,(byte *)"string != NULL"), iVar2 == 1)) {
+    pcVar1 = (code *)swi(3);
+    iVar2 = (*pcVar1)();
+    return iVar2;
+  }
+  if ((param_3 == (byte *)0x0) &&
+     (iVar2 = FUN_004999a0(2,0x4baea0,0x5e,0,(byte *)"format != NULL"), iVar2 == 1)) {
+    pcVar1 = (code *)swi(3);
+    iVar2 = (*pcVar1)();
+    return iVar2;
+  }
+  local_18 = 0x42;
+  local_1c = param_1;
+  local_24 = param_1;
+  local_20 = param_2;
+  iVar2 = FUN_0049dba0((int *)&local_24,param_3,(undefined4 *)&stack0x00000010);
+  local_20 = local_20 + -1;
+  if (local_20 < 0) {
+    FUN_0049d920(0,(int *)&local_24);
+  }
+  else {
+    *local_24 = 0;
+  }
+  return iVar2;
+}
+

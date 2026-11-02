@@ -1,0 +1,23 @@
+/* FUN_00453140 @ 00453140 */
+/* decompiled from Lucky.exe (Game.run) */
+
+
+void FUN_00453140(void)
+
+{
+  int iVar1;
+  undefined4 *puVar2;
+  undefined4 local_44 [15];
+  undefined4 uStack_8;
+  
+  puVar2 = local_44;
+  for (iVar1 = 0x10; iVar1 != 0; iVar1 = iVar1 + -1) {
+    *puVar2 = 0xcccccccc;
+    puVar2 = puVar2 + 1;
+  }
+  FUN_00451500(&DAT_004e9370,&DAT_004e8688,DAT_004e865c);
+  uStack_8 = 0x45317e;
+  __chkesp();
+  return;
+}
+

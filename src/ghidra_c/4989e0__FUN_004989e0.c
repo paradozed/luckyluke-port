@@ -1,0 +1,81 @@
+/* FUN_004989e0 @ 004989e0 */
+/* decompiled from Lucky.exe (Game.run) */
+
+
+uint __cdecl FUN_004989e0(char *param_1,uint param_2,uint param_3,int *param_4)
+
+{
+  int iVar1;
+  uint uVar2;
+  uint uVar3;
+  DWORD local_28;
+  uint local_24;
+  uint local_20;
+  uint local_10;
+  char *local_c;
+  char local_8;
+  
+  local_c = param_1;
+  uVar3 = param_2 * param_3;
+  if (uVar3 == 0) {
+    param_3 = 0;
+  }
+  else {
+    local_10 = uVar3;
+    if ((param_4[3] & 0x10cU) == 0) {
+      local_20 = 0x1000;
+    }
+    else {
+      local_20 = param_4[6];
+    }
+    while (local_10 != 0) {
+      if (((param_4[3] & 0x10cU) == 0) || (param_4[1] == 0)) {
+        if (local_10 < local_20) {
+          uVar2 = FUN_004a1880(param_4);
+          if (uVar2 == 0xffffffff) {
+            return (uVar3 - local_10) / param_2;
+          }
+          local_8 = (char)uVar2;
+          *local_c = local_8;
+          local_c = local_c + 1;
+          local_10 = local_10 - 1;
+          local_20 = param_4[6];
+        }
+        else {
+          if (local_20 == 0) {
+            local_28 = local_10;
+          }
+          else {
+            local_28 = local_10 - local_10 % local_20;
+          }
+          iVar1 = FUN_004a1b50(param_4[4],local_c,local_28);
+          if (iVar1 == 0) {
+            param_4[3] = param_4[3] | 0x10;
+            return (uVar3 - local_10) / param_2;
+          }
+          if (iVar1 == -1) {
+            param_4[3] = param_4[3] | 0x20;
+            return (uVar3 - local_10) / param_2;
+          }
+          local_10 = local_10 - iVar1;
+          local_c = local_c + iVar1;
+        }
+      }
+      else {
+        if (local_10 < (uint)param_4[1]) {
+          local_24 = local_10;
+        }
+        else {
+          local_24 = param_4[1];
+        }
+        FUN_00497690((undefined4 *)local_c,(undefined4 *)*param_4,local_24);
+        local_10 = local_10 - local_24;
+        param_4[1] = param_4[1] - local_24;
+        *param_4 = *param_4 + local_24;
+        local_c = local_c + local_24;
+      }
+    }
+  }
+  return param_3;
+}
+
