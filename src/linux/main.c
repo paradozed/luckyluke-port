@@ -105,6 +105,15 @@ static uint32_t menu_animation_fraction[128];
 static uint32_t menu_animation_object_start[128];
 static uint32_t menu_animation_started;
 static uint16_t menu_animation_callback_owner[128]; /* context index + 1 */
+
+/* BIZ sprite animation state: time-based frame progression driven by
+ * SOOL command 0x42. Each sprite frame carries a duration; the engine
+ * advances to the next frame when that duration elapses. */
+static uint16_t menu_sprite_animation_selector[128];
+static unsigned char menu_sprite_animation_once[128];
+static uint16_t menu_sprite_animation_first[128], menu_sprite_animation_last[128];
+static uint16_t menu_sprite_animation_frame[128];
+static uint32_t menu_sprite_animation_start[128];
 static LL_BibPackedPose *menu_animation_evaluated[128], *menu_animation_initial[128];
 static uint16_t menu_animation_pose_count[128];
 static unsigned char menu_animation_pose_valid[128];
@@ -1107,6 +1116,7 @@ static int menu_sool_dispatch(uint8_t opcode, uint16_t *stack, size_t *stack_siz
         } else if (command == 0x42 && count == 3u && current_instance != NULL) {
             uint16_t selector = stack[*stack_size - 2u];
             uint16_t frame_index = stack[*stack_size - 3u];
+            uint16_t play_once = stack[*stack_size - 1u] != 0 ? 1u : 0u;
             LL_BibSpriteFrame frame;
             LL_BizObject object;
             if (!ll_bib_get_sprite_frame(&game_level.bib, selector, frame_index, &frame) ||
@@ -1114,12 +1124,37 @@ static int menu_sool_dispatch(uint8_t opcode, uint16_t *stack, size_t *stack_siz
                 fprintf(stderr, "ERROR: BIB sprite selector %u frame %u is unavailable\n", selector, frame_index);
                 return 0;
             }
+            /* Determine the animation's last frame from the section header. */
+            LL_BibSelector section;
+            uint16_t frame_count = 0;
+            if (ll_bib_get_selector(&game_level.bib, selector, &section) &&
+                section.is_section && section.size >= 12u) {
+                frame_count = (uint16_t)((uint16_t)game_level.bib.raw_data[section.offset + 2] |
+                                         ((uint16_t)game_level.bib.raw_data[section.offset + 3] << 8));
+            }
+            if (frame_count == 0 || frame_index >= frame_count) {
+                fprintf(stderr, "ERROR: BIZ animation selector %u has no valid frames\n", selector);
+                return 0;
+            }
+            uint16_t last_frame = (uint16_t)(frame_count - 1u);
             for (size_t i = 0; i < menu_scene_object_count; i++) {
                 if (menu_scene_objects[i].instance_id != *current_instance || !menu_scene_objects[i].is_biz_sprite) continue;
+                menu_sprite_animation_selector[i] = selector;
+                menu_sprite_animation_once[i] = (unsigned char)play_once;
+                menu_sprite_animation_first[i] = frame_index;
+                menu_sprite_animation_last[i] = last_frame;
+                menu_sprite_animation_frame[i] = frame_index;
+                menu_sprite_animation_start[i] = SDL_GetTicks();
                 menu_scene_objects[i].biz_object = frame.object_index;
                 menu_sprite_offset[i][0] = frame.offset_x;
                 menu_sprite_offset[i][1] = frame.offset_y;
             }
+            if (play_once && menu_dispatch_vm != NULL) {
+                menu_dispatch_vm->host_animation_wait = 1;
+                menu_dispatch_vm->host_yield = 1;
+            }
+            fprintf(stderr, "INFO: SOOL instance %u starts BIZ sprite animation %u from frame %u (%u frames, once=%u)\n",
+                    *current_instance, selector, frame_index, frame_count, play_once);
         } else if (command == 0x10 && count >= 3) {
             uint16_t instance = stack[*stack_size - 2u];
             int visible = stack[*stack_size - 3u] != 0;
@@ -2456,52 +2491,57 @@ static void menu_render_sprite_groups(void)
 
 static void render_menu(int selection, int page, unsigned int tick)
 {
-    (void)selection;
     (void)page;
-    (void)tick;
-    /* The old port menu was a hand-drawn approximation. Keep the menu render
-     * surface empty until the BIB/BIZ scene interpreter emits the real scene;
-     * never silently substitute invented buildings, signs, or labels. */
+    /* Render the BIB/BIZ scene as background, then draw the menu overlay
+     * (title, buttons, selection) on top. */
     glClearColor(0.012f, 0.018f, 0.045f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     menu_render_background_sprites();
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    /* The 3DX descriptors store scene anchors in the same horizontal/vertical
-     * frame used by the original menu. This first native pass draws the
-     * instantiated BIB meshes directly; camera motion and face materials are
-     * applied by the SOOL/driver path as that interpretation is completed. */
-    /* FUN_00482e60 adds projected Y directly to the screen center:
-     * negative model Y points upward on the original screen. */
-    glOrtho(-400.0, 1600.0, 200.0, -2200.0, -3000.0, 3000.0);
+    glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glEnable(GL_DEPTH_TEST);
-    if (menu_camera.has_reference && menu_camera.projection != 0) {
-        /* FUN_004830a0 stores integer focal scales after truncation. */
-        double focal_x = (int)(menu_camera.projection * (640.0 / 448.0));
-        double focal_y = (int)(menu_camera.projection * (480.0 / 240.0));
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glFrustum(-320.0 / focal_x, 320.0 / focal_x,
-                  -240.0 / focal_y, 240.0 / focal_y, 1.0, 200000.0);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-        glScaled(1, -1, -1); /* engine screen Y down and camera depth positive */
-        int16_t rotation[3][3];
-        int32_t translation[3];
-        GLdouble view[16]={0};
-        ll_native_camera_view(menu_camera.pitch,menu_camera.yaw,menu_camera.reference,
-            menu_camera_depth,rotation,translation);
-        for (unsigned row=0;row<3;row++)
-            for (unsigned column=0;column<3;column++)
-                view[column*4u+row]=rotation[row][column]/4096.0;
-        view[15]=1;
-        for (unsigned row=0;row<3;row++) view[12u+row]=translation[row];
-        glMultMatrixd(view);
-    }
-    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+    /* ---- Advance BIZ sprite animations (time-based frame progression) ---- */
+    for (size_t object_index = 0; object_index < menu_scene_object_count; object_index++) {
+        if (!menu_scene_objects[object_index].is_biz_sprite ||
+            !menu_scene_objects[object_index].visible ||
+            menu_sprite_animation_selector[object_index] == 0)
+            continue;
+        uint32_t now = tick;
+        uint32_t elapsed = now - menu_sprite_animation_start[object_index];
+        uint16_t frame = menu_sprite_animation_frame[object_index];
+        for (;;) {
+            LL_BibSpriteFrame current;
+            if (!ll_bib_get_sprite_frame(&game_level.bib,
+                    menu_sprite_animation_selector[object_index], frame, &current))
+                break;
+            if (elapsed < current.duration) break;
+            elapsed -= current.duration;
+            if (frame >= menu_sprite_animation_last[object_index]) {
+                if (menu_sprite_animation_once[object_index]) {
+                    frame = menu_sprite_animation_last[object_index];
+                    break;
+                }
+                frame = menu_sprite_animation_first[object_index];
+            } else {
+                frame++;
+            }
+        }
+        if (frame != menu_sprite_animation_frame[object_index]) {
+            LL_BibSpriteFrame next_frame;
+            if (ll_bib_get_sprite_frame(&game_level.bib,
+                    menu_sprite_animation_selector[object_index], frame, &next_frame)) {
+                menu_sprite_animation_frame[object_index] = frame;
+                menu_sprite_animation_start[object_index] = now - elapsed;
+                menu_scene_objects[object_index].biz_object = next_frame.object_index;
+                menu_sprite_offset[object_index][0] = next_frame.offset_x;
+                menu_sprite_offset[object_index][1] = next_frame.offset_y;
+            }
+        }
+    }
     for (size_t object_index = 0; object_index < menu_scene_object_count; object_index++) {
         const LL_MenuSceneObject *object = &menu_scene_objects[object_index];
         const LL_Bib3dxModel *model;
@@ -2657,6 +2697,57 @@ static void render_menu(int selection, int page, unsigned int tick)
     glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+    /* Draw menu title and selection overlay */
+    glColor3f(1.0f, 0.8f, 0.2f);
+    draw_text("LUCKY LUKE", WINDOW_WIDTH / 2 - 120, 120, 3, 1.0f, 0.8f, 0.2f);
+
+    /* Draw menu buttons */
+    int button_w = 200;
+    int button_h = 48;
+    int button_x = WINDOW_WIDTH / 2 - button_w / 2;
+    int button_y_start = 260;
+    int button_spacing = 72;
+    const char *button_labels[2] = {"GAME", "OPTIONS"};
+
+    for (int i = 0; i < 2; i++) {
+        int button_y = button_y_start + i * button_spacing;
+        int is_selected = (selection == i);
+
+        glColor4f(0.15f, 0.18f, 0.25f, 0.85f);
+        if (is_selected) {
+            glColor4f(0.25f, 0.35f, 0.55f, 0.95f);
+        }
+        glBegin(GL_QUADS);
+        glVertex2i(button_x, button_y);
+        glVertex2i(button_x + button_w, button_y);
+        glVertex2i(button_x + button_w, button_y + button_h);
+        glVertex2i(button_x, button_y + button_h);
+        glEnd();
+
+        glColor3f(0.8f, 0.8f, 0.8f);
+        glBegin(GL_LINE_LOOP);
+        glVertex2i(button_x, button_y);
+        glVertex2i(button_x + button_w, button_y);
+        glVertex2i(button_x + button_w, button_y + button_h);
+        glVertex2i(button_x, button_y + button_h);
+        glEnd();
+
+        draw_text(button_labels[i],
+                  WINDOW_WIDTH / 2 - (int)strlen(button_labels[i]) * 4 * 2,
+                  button_y + button_h / 2 - 8,
+                  2, 1.0f, 1.0f, 1.0f);
+
+        if (is_selected) {
+            glColor3f(1.0f, 0.8f, 0.0f);
+            glBegin(GL_TRIANGLES);
+            glVertex2i(button_x - 40, button_y + button_h / 2);
+            glVertex2i(button_x - 20, button_y + button_h / 2 - 10);
+            glVertex2i(button_x - 20, button_y + button_h / 2 + 10);
+            glEnd();
+        }
+    }
+
+    draw_text("ESC TO QUIT", WINDOW_WIDTH / 2 - 70, 420, 1, 0.6f, 0.6f, 0.6f);
     draw_menu_asset_errors();
 }
 
