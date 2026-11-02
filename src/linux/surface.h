@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "renderer.h"
+#include "renderer.h"
 
 /*
  * DirectDraw surface emulation for the native Linux port.
@@ -64,7 +65,8 @@ int ll_surface_flip(LL_Surface *surface1, LL_Surface *surface2);
 /* Present a surface to the screen via OpenGL.
  * drawable_width/drawable_height are the window drawable dimensions.
  * Returns 1 on success, 0 on failure. */
-int ll_surface_present(LL_Surface *surface,
+int ll_surface_present(LL_Renderer *renderer,
+                       LL_Surface *surface,
                        int drawable_width, int drawable_height);
 
 /* Surface manager: holds primary, backbuffer, and optional offscreen

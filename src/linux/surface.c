@@ -29,13 +29,6 @@ struct LL_Surface {
     int dirty;              /* 1 if pixels modified since last present */
 };
 
-struct LL_SurfaceManager {
-    LL_Surface *primary;
-    LL_Surface *backbuffer;
-    LL_Surface *offscreen[32];
-    int offscreen_count;
-};
-
 LL_Surface *ll_surface_create(int width, int height, LL_PixelFormat format)
 {
     LL_Surface *surf;
@@ -102,7 +95,7 @@ int ll_surface_blit(LL_Surface *dst, int dst_x, int dst_y,
                     LL_Surface *src, int src_x, int src_y,
                     int width, int height)
 {
-    if (dst == NULL || src == NULL || surface->locked || src->locked) {
+    if (dst == NULL || src == NULL || dst->locked || src->locked) {
         return 0;
     }
     if (width <= 0 || height <= 0) {
@@ -173,20 +166,18 @@ int ll_surface_flip(LL_Surface *surface1, LL_Surface *surface2)
     return 1;
 }
 
-int ll_surface_present(LL_Surface *surface,
+int ll_surface_present(LL_Renderer *renderer,
+                       LL_Surface *surface,
                        int drawable_width, int drawable_height)
 {
-    if (surface == NULL || surface->pixels == NULL) {
+    if (renderer == NULL || surface == NULL || surface->pixels == NULL) {
         return 0;
     }
 
-    /* Use the renderer's present function */
-    return renderer_present(surface->pixels,
-                            surface->width, surface->height,
-                            surface->pitch,
-                            surface->format,
-                            NULL,
-                            drawable_width, drawable_height);
+    return ll_renderer_present_pixels(renderer, surface->pixels,
+                        surface->width, surface->height,
+                        surface->pitch, surface->format,
+                        drawable_width, drawable_height);
 }
 
 LL_SurfaceManager *ll_surface_manager_create(int width, int height,
