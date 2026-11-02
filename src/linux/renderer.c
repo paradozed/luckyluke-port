@@ -253,3 +253,83 @@ int ll_renderer_present_fit(LL_Renderer *renderer,
     return renderer_present(renderer, pixels, pixels_size, pitch, format,
                             palette_rgba, 1);
 }
+
+int ll_renderer_present_pixels(LL_Renderer *renderer,
+                               const unsigned char *pixels,
+                               int width, int height, int pitch,
+                               LL_PixelFormat format,
+                               int drawable_width, int drawable_height)
+{
+    const unsigned char *source = (const unsigned char *)pixels;
+    size_t pixel_size = bytes_per_pixel(format);
+    int y;
+    GLint viewport[4];    float destination_width;
+    float destination_height;
+    float destination_x;
+    float destination_y;
+    unsigned char *temp_rgba = NULL;
+
+    if (renderer == NULL || renderer->texture == 0 || source == NULL ||
+        pixel_size == 0) {
+        return 0;
+    }
+
+    if ((size_t)width > SIZE_MAX / pixel_size) {
+        return 0;
+    }
+
+    temp_rgba = (unsigned char *)malloc((size_t)width * (size_t)height * 4);
+    if (temp_rgba == NULL) {
+        return 0;
+    }
+
+    for (y = 0; y < height; y++) {
+        convert_row(temp_rgba + (size_t)y * (size_t)width * 4,
+                    source + (size_t)y * pitch,
+                    width,
+                    format,
+                    NULL);
+    }
+
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, renderer->texture);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
+                    width, height,
+                    GL_RGBA, GL_UNSIGNED_BYTE, temp_rgba);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0, drawable_width, drawable_height, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    destination_width = (float)width;
+    destination_height = (float)height;
+    destination_x = ((float)drawable_width - destination_width) * 0.5f;
+    destination_y = ((float)drawable_height - destination_height) * 0.5f;
+
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(destination_x, destination_y);
+    glTexCoord2f(1.0f, 0.0f); glVertex2f(destination_x + destination_width, destination_y);
+    glTexCoord2f(1.0f, 1.0f); glVertex2f(destination_x + destination_width,
+                                         destination_y + destination_height);
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(destination_x, destination_y + destination_height);
+    glEnd();
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glDisable(GL_TEXTURE_2D);
+
+    free(temp_rgba);
+    return glGetError() == GL_NO_ERROR;
+}
