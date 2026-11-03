@@ -2760,28 +2760,15 @@ static void render_menu(int selection, int page, unsigned int tick)
     glLoadIdentity();
 
     /* Detect whether SOOL has positioned original menu UI elements
-     * (title, buttons, arrows, cursors) via BIZ screen sprites or
-     * sprite groups. If so, the original assets drive the menu. */
-    int has_sool_ui = 0;
-    for (size_t i = 0; i < menu_scene_object_count && !has_sool_ui; i++) {
-        if (menu_scene_objects[i].is_biz_sprite && menu_sprite_has_screen[i])
-            has_sool_ui = 1;
-    }
-    for (unsigned id = 0; id < 256 && !has_sool_ui; id++) {
-        if (menu_sprite_groups[id].enabled == 1) {
-            for (unsigned index = 0; index < menu_sprite_groups[id].count; index++) {
-                if (menu_sprite_groups[id].children[index].present) {
-                    has_sool_ui = 1;
-                    break;
-                }
-            }
-        }
-    }
+     * (models, sprites, arrows, cursors) via BIB/BIZ scene objects.
+     * If SOOL created any scene object (0x65/0x71 commands), the original
+     * assets drive the menu and the error message must not appear. */
+    int has_sool_ui = menu_scene_object_count > 0;
 
     if (!has_sool_ui) {
         /* No original BIB/BIZ assets have been positioned by the SOOL
          * script. Refuse to substitute invented UI: report an explicit
-         * error on stdout and leave the frame empty. */
+         * error on stderr and leave the frame empty. */
         fprintf(stderr,
                 "ERROR: no original menu assets loaded (option.cod / option.bib / option.biz missing or not parsed).\n"
                 "       Set cd_mount in config.ini to your Lucky Luke CD mount point.\n");
@@ -2802,9 +2789,6 @@ int main(void)
         menu_asset_errors |= asset_config.mount_error
                                  ? MENU_ASSET_CD_MOUNT_ERROR
                                  : MENU_ASSET_CONFIG_ERROR;
-    } else {
-        fprintf(stderr, "DEBUG: cd_mount=%s language=%c\n",
-                asset_config.cd_mount, asset_config.language_code);
     }
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -2866,17 +2850,6 @@ int main(void)
     menu_audio_init();
     if (ll_level_has_bib(&game_level) && menu_biz_loaded)
         load_and_execute_menu_script();
-
-    /* Diagnostic: report exactly why the menu assets are not available. */
-    if (!ll_level_has_bib(&game_level)) {
-        fprintf(stderr, "DEBUG: menu BIB not loaded (load_menu_bib failed)\n");
-    }
-    if (!menu_biz_loaded) {
-        fprintf(stderr, "DEBUG: menu BIZ not loaded (load_menu_biz failed)\n");
-    }
-    if (!menu_program_loaded) {
-        fprintf(stderr, "DEBUG: menu SOOL program not loaded (option.cod not executed)\n");
-    }
 
     SDL_GL_SetSwapInterval(1);
     {
