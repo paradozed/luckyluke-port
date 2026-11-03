@@ -2575,6 +2575,19 @@ static int project_model_vertex(const int16_t vertex_pos[3],
         world[2] = model_pos[2] + vertex_pos[2];
     }
 
+    /* Compute camera-space Z before projecting: reject vertices behind or
+     * too close to the camera, where ll_native_camera_screen clamps z to 100
+     * and produces garbage screen coordinates. */
+    int16_t cam_rows[3][3];
+    ll_native_camera_rotation(menu_camera.pitch, menu_camera.yaw, cam_rows);
+    int64_t dot_world = 0, dot_ref = 0;
+    for (unsigned i = 0; i < 3; i++) {
+        dot_world += (int64_t)cam_rows[2][i] * world[i];
+        dot_ref   += (int64_t)cam_rows[2][i] * menu_camera.reference[i];
+    }
+    int32_t cam_z = (int32_t)((dot_world - dot_ref) / 4096) + (int32_t)menu_camera_depth;
+    if (cam_z < 300) return 0;
+
     /* Project through camera to DirectDraw 512x256 screen space */
     int32_t dd_screen[2];
     ll_native_camera_screen(world, menu_camera.reference,
@@ -2585,6 +2598,10 @@ static int project_model_vertex(const int16_t vertex_pos[3],
     /* Scale from 512x256 to window space */
     screen_out[0] = dd_screen[0] * WINDOW_WIDTH / 512;
     screen_out[1] = dd_screen[1] * WINDOW_HEIGHT / 256;
+    /* Reject vertices projected absurdly far. */
+    if (screen_out[0] < -3000 || screen_out[0] > 3000 ||
+        screen_out[1] < -2000 || screen_out[1] > 2000)
+        return 0;
     return 1;
 }
 
@@ -2732,7 +2749,6 @@ static void render_menu(int selection, int page, unsigned int tick)
         int32_t screen_pos[2];
         const int16_t *model_rot = NULL;
         int32_t model_angles[3] = {0, 0, 0};
-        int have_model_transform;
         if (menu_camera.has_reference && menu_object_has_pose[object_index]) {
             const LL_BibScenePose *pose = &menu_object_poses[object_index];
             model_pos[0] = pose->position[0];
@@ -2741,13 +2757,11 @@ static void render_menu(int selection, int page, unsigned int tick)
             model_angles[0] = pose->angles[0];
             model_angles[1] = pose->angles[1];
             model_angles[2] = pose->angles[2];
-            have_model_transform = 1;
         } else {
             model_pos[0] = model->anchor[0];
             model_pos[1] = model->anchor[1];
             model_pos[2] = model->anchor[2];
             model_rot = model->orientation;
-            have_model_transform = 1;
         }
 
         for (uint32_t group_index = 0; group_index < model->group_count; group_index++) {
@@ -2765,40 +2779,53 @@ static void render_menu(int selection, int page, unsigned int tick)
                     glEnable(GL_ALPHA_TEST);
                     glAlphaFunc(GL_GREATER, 0.0f);
                 } else glDisable(GL_TEXTURE_2D);
-                /* Flat primitive constructors preserve the packed source
-                 * color at +8 (FUN_0048edd0/FUN_0048e3d0). */
-                uint32_t flat_color = element->attributes;
-                glColor3ub((GLubyte)(flat_color & 255u),
-                           (GLubyte)((flat_color >> 8) & 255u),
-                           (GLubyte)((flat_color >> 16) & 255u));
-                if (texture != NULL && texture->texture != 0) glColor3f(1, 1, 1);
-                /* FUN_0048c5b0 submits geometry 0,1,3,2 against attributes
-                 * in strip order. Keep source geometry on its perimeter. */
+                /* Collect projected vertices first; skip element if any
+                 * vertex projects off-screen (behind/too close to camera). */
                 static const uint8_t quad_corners[6] = {0, 1, 3, 3, 1, 2};
-                glBegin(GL_TRIANGLES);
+                int32_t proj_x[6], proj_y[6];
+                uint32_t proj_color[6];
+                int all_valid = 1;
                 for (uint32_t submitted = 0; submitted < (quad ? 6u : 3u); submitted++) {
                     uint32_t corner = quad ? quad_corners[submitted] : submitted;
                     uint32_t attribute_corner = quad && corner >= 2u ? 5u - corner : corner;
                     uint16_t vertex_index = element->vertex_indices[corner];
                     const LL_BibVertex *vertex;
-                    if (vertex_index >= model->vertex_count) continue;
+                    if (vertex_index >= model->vertex_count) { all_valid = 0; break; }
                     vertex = menu_neutral_vertices[object_index] != NULL
                         ? &menu_neutral_vertices[object_index][vertex_index] : &model->vertices[vertex_index];
-                    if (group->type >= 4u) {
-                        uint32_t color = element->corner_colors[attribute_corner];
-                        glColor3ub((GLubyte)(color & 255u),
-                                   (GLubyte)((color >> 8) & 255u),
-                                   (GLubyte)((color >> 16) & 255u));
+                    if (!project_model_vertex(vertex->position, model_pos,
+                                              model_rot, model_angles,
+                                              screen_pos)) { all_valid = 0; break; }
+                    proj_x[submitted] = screen_pos[0];
+                    proj_y[submitted] = screen_pos[1];
+                    proj_color[submitted] = (group->type >= 4u)
+                        ? element->corner_colors[attribute_corner]
+                        : element->attributes;
+                }
+                if (!all_valid) continue;
+
+                /* FUN_0048c5b0 submits geometry 0,1,3,2 against attributes
+                 * in strip order. Keep source geometry on its perimeter. */
+                static const uint8_t quad_corners2[6] = {0, 1, 3, 3, 1, 2};
+                glBegin(GL_TRIANGLES);
+                for (uint32_t submitted = 0; submitted < (quad ? 6u : 3u); submitted++) {
+                    uint32_t corner = quad ? quad_corners2[submitted] : submitted;
+                    uint32_t attribute_corner = quad && corner >= 2u ? 5u - corner : corner;
+                    if (texture != NULL && texture->texture != 0) {
+                        glColor3f(1, 1, 1);
+                    } else if (group->type < 4u) {
+                        glColor3ub((GLubyte)(proj_color[0] & 255u),
+                                   (GLubyte)((proj_color[0] >> 8) & 255u),
+                                   (GLubyte)((proj_color[0] >> 16) & 255u));
+                    } else {
+                        glColor3ub((GLubyte)(proj_color[submitted] & 255u),
+                                   (GLubyte)((proj_color[submitted] >> 8) & 255u),
+                                   (GLubyte)((proj_color[submitted] >> 16) & 255u));
                     }
                     if (texture != NULL && texture->texture != 0)
                         glTexCoord2f((float)(element->corner_data[attribute_corner][0] - texture->sprite.texture_x) / texture->width,
                                      (float)(element->corner_data[attribute_corner][1] - texture->sprite.texture_y) / texture->height);
-                    if (!have_model_transform ||
-                        project_model_vertex(vertex->position, model_pos,
-                                             model_rot, model_angles,
-                                             screen_pos)) {
-                        glVertex2i(screen_pos[0], screen_pos[1]);
-                    }
+                    glVertex2i(proj_x[submitted], proj_y[submitted]);
                 }
                 glEnd();
                 glDisable(GL_ALPHA_TEST);
