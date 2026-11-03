@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCES=("$ROOT/src/linux/main.c" "$ROOT/src/linux/audio_mix.c" "$ROOT/src/linux/native_camera.c" "$ROOT/src/linux/asset_config.c" "$ROOT/src/linux/menu_art.c" "$ROOT/src/linux/pcx.c" "$ROOT/src/linux/kxp.c" "$ROOT/src/linux/level.c" "$ROOT/src/linux/renderer.c" "$ROOT/src/linux/surface.c" "$ROOT/src/linux/object.c" "$ROOT/src/linux/gameplay.c" "$ROOT/src/linux/cod.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/biz.c" "$ROOT/src/linux/sool.c")
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCES=("$ROOT/src/linux/main.c" "$ROOT/src/linux/audio_mix.c" "$ROOT/src/linux/native_camera.c" "$ROOT/src/linux/asset_config.c" "$ROOT/src/linux/menu_art.c" "$ROOT/src/linux/pcx.c" "$ROOT/src/linux/kxp.c" "$ROOT/src/linux/level.c" "$ROOT/src/linux/renderer.c" "$ROOT/src/linux/object.c" "$ROOT/src/linux/gameplay.c" "$ROOT/src/linux/cod.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/biz.c" "$ROOT/src/linux/sool.c")
 OUTPUT="$ROOT/build/linux/lucky-luke"
 TEST_OUTPUT="$ROOT/build/linux/renderer-test"
 PCX_TEST_OUTPUT="$ROOT/build/linux/pcx-test"
