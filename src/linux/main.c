@@ -2586,7 +2586,7 @@ static int project_model_vertex(const int16_t vertex_pos[3],
         dot_ref   += (int64_t)cam_rows[2][i] * menu_camera.reference[i];
     }
     int32_t cam_z = (int32_t)((dot_world - dot_ref) / 4096) + (int32_t)menu_camera_depth;
-    if (cam_z < 300) return 0;
+    if (cam_z < 1500) return 0;
 
     /* Project through camera to DirectDraw 512x256 screen space */
     int32_t dd_screen[2];
