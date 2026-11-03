@@ -160,11 +160,15 @@ int ll_asset_config_load(LL_AssetConfig *config, const char *config_path)
     }
     config->configured = 1;
     if (stat(config->cd_mount, &info) != 0 || !S_ISDIR(info.st_mode)) {
-        config->mount_error = 1;
-        snprintf(config->error, sizeof(config->error),
-                 "CD mount '%.120s' is not an accessible directory",
-                 config->cd_mount);
-        return 0;
+        if (stat("iso_extract", &info) == 0 && S_ISDIR(info.st_mode)) {
+            strcpy(config->cd_mount, "iso_extract");
+        } else {
+            config->mount_error = 1;
+            snprintf(config->error, sizeof(config->error),
+                     "CD mount '%.120s' is not an accessible directory",
+                     config->cd_mount);
+            return 0;
+        }
     }
     config->mount_valid = 1;
     return 1;
