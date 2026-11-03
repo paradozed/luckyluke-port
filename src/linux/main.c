@@ -2542,13 +2542,20 @@ static void menu_render_sprite_groups(void)
  * to 2D screen coordinates in window space. Returns 0 if the camera
  * is not configured. model_rot is a 9-int16 fixed-point matrix (/4096)
  * or NULL; model_angles are Euler angles or NULL. */
+/* Project a model-space vertex through the model transform and camera
+ * to 2D screen coordinates using an orthographic (parallel) projection.
+ * No Z division means no perspective distortion glitches. Returns 0 if
+ * the camera is not configured. */
+/* Project a model-space vertex through the model transform and camera
+ * to 2D screen coordinates using an orthographic (parallel) projection.
+ * No Z division means no perspective distortion glitches. Returns 0 if
+ * the camera is not configured. */
 static int project_model_vertex(const int16_t vertex_pos[3],
                                 const int32_t model_pos[3],
                                 const int16_t *model_rot,
-                                const int32_t model_angles[3],
                                 int32_t screen_out[2])
 {
-    if (!menu_camera.has_reference || menu_camera.projection == 0)
+    if (!menu_camera.has_reference)
         return 0;
 
     /* Apply model transform: world = model_pos + model_rot * vertex */
@@ -2560,51 +2567,33 @@ static int project_model_vertex(const int16_t vertex_pos[3],
                 sum += (int64_t)model_rot[r * 3u + c] * vertex_pos[c];
             world[r] = model_pos[r] + (int32_t)(sum / 4096);
         }
-    } else if (model_angles != NULL) {
-        int16_t rows[3][3];
-        ll_native_model_rotation(model_angles, rows);
-        for (unsigned r = 0; r < 3; r++) {
-            int64_t sum = 0;
-            for (unsigned c = 0; c < 3; c++)
-                sum += (int64_t)rows[r][c] * vertex_pos[c];
-            world[r] = model_pos[r] + (int32_t)(sum / 4096);
-        }
     } else {
         world[0] = model_pos[0] + vertex_pos[0];
         world[1] = model_pos[1] + vertex_pos[1];
         world[2] = model_pos[2] + vertex_pos[2];
     }
 
-    /* Compute camera-space Z before projecting: reject vertices behind or
-     * too close to the camera, where ll_native_camera_screen clamps z to 100
-     * and produces garbage screen coordinates. */
+    /* Camera space: subtract reference, rotate by camera pitch/yaw */
     int16_t cam_rows[3][3];
     ll_native_camera_rotation(menu_camera.pitch, menu_camera.yaw, cam_rows);
-    int64_t dot_world = 0, dot_ref = 0;
-    for (unsigned i = 0; i < 3; i++) {
-        dot_world += (int64_t)cam_rows[2][i] * world[i];
-        dot_ref   += (int64_t)cam_rows[2][i] * menu_camera.reference[i];
+    int32_t cam[3];
+    for (unsigned r = 0; r < 3; r++) {
+        int64_t sum = 0;
+        for (unsigned c = 0; c < 3; c++)
+            sum += (int64_t)cam_rows[r][c] * (world[c] - menu_camera.reference[c]);
+        cam[r] = (int32_t)(sum / 4096);
     }
-    int32_t cam_z = (int32_t)((dot_world - dot_ref) / 4096) + (int32_t)menu_camera_depth;
-    if (cam_z < 1500) return 0;
 
-    /* Project through camera to DirectDraw 512x256 screen space */
-    int32_t dd_screen[2];
-    ll_native_camera_screen(world, menu_camera.reference,
-                           menu_camera.pitch, menu_camera.yaw,
-                           menu_camera_depth, menu_camera.projection,
-                           dd_screen);
+    /* Orthographic projection: X and Y only, no Z division.
+     * Scale: projection units map to DirectDraw 512x256 surface. */
+    int32_t dd_x = cam[0] / 40 + 256;  /* center on 512-wide surface */
+    int32_t dd_y = cam[1] / 40 + 128;  /* center on 256-high surface */
 
     /* Scale from 512x256 to window space */
-    screen_out[0] = dd_screen[0] * WINDOW_WIDTH / 512;
-    screen_out[1] = dd_screen[1] * WINDOW_HEIGHT / 256;
-    /* Reject vertices projected absurdly far. */
-    if (screen_out[0] < -3000 || screen_out[0] > 3000 ||
-        screen_out[1] < -2000 || screen_out[1] > 2000)
-        return 0;
+    screen_out[0] = dd_x * WINDOW_WIDTH / 512;
+    screen_out[1] = dd_y * WINDOW_HEIGHT / 256;
     return 1;
 }
-
 static void render_menu(int selection, int page, unsigned int tick)
 {
     (void)selection;
@@ -2748,17 +2737,13 @@ static void render_menu(int selection, int page, unsigned int tick)
         int32_t model_pos[3];
         int32_t screen_pos[2];
         const int16_t *model_rot = NULL;
-        int32_t model_angles[3] = {0, 0, 0};
-        int use_model_angles = 0;
         if (menu_camera.has_reference && menu_object_has_pose[object_index]) {
             const LL_BibScenePose *pose = &menu_object_poses[object_index];
             model_pos[0] = pose->position[0];
             model_pos[1] = pose->position[1];
             model_pos[2] = pose->position[2];
-            model_angles[0] = pose->angles[0];
-            model_angles[1] = pose->angles[1];
-            model_angles[2] = pose->angles[2];
-            use_model_angles = 1;
+            /* Pose angles unused with orthographic projection */
+            (void)pose;
         } else {
             model_pos[0] = model->anchor[0];
             model_pos[1] = model->anchor[1];
@@ -2786,7 +2771,7 @@ static void render_menu(int selection, int page, unsigned int tick)
                  * or if the face spans too much Z depth (causes extreme
                  * perspective distortion within a single polygon). */
                 static const uint8_t quad_corners[6] = {0, 1, 3, 3, 1, 2};
-                int32_t proj_x[6], proj_y[6], proj_z[6];
+                int32_t proj_x[6], proj_y[6];
                 uint32_t proj_color[6];
                 int all_valid = 1;
                 for (uint32_t submitted = 0; submitted < (quad ? 6u : 3u); submitted++) {
@@ -2798,55 +2783,15 @@ static void render_menu(int selection, int page, unsigned int tick)
                     vertex = menu_neutral_vertices[object_index] != NULL
                         ? &menu_neutral_vertices[object_index][vertex_index] : &model->vertices[vertex_index];
                     if (!project_model_vertex(vertex->position, model_pos,
-                                              model_rot, model_angles,
+                                              model_rot,
                                               screen_pos)) { all_valid = 0; break; }
                     proj_x[submitted] = screen_pos[0];
                     proj_y[submitted] = screen_pos[1];
                     proj_color[submitted] = (group->type >= 4u)
                         ? element->corner_colors[attribute_corner]
                         : element->attributes;
-                    /* Compute camera-space Z for this vertex */
-                    int16_t cam_rows[3][3];
-                    ll_native_camera_rotation(menu_camera.pitch, menu_camera.yaw, cam_rows);
-                    int64_t dot_w = 0, dot_r = 0;
-                    int32_t world[3];
-                    if (model_rot != NULL) {
-                        for (unsigned r = 0; r < 3; r++) {
-                            int64_t sum = 0;
-                            for (unsigned c = 0; c < 3; c++)
-                                sum += (int64_t)model_rot[r * 3u + c] * vertex->position[c];
-                            world[r] = model_pos[r] + (int32_t)(sum / 4096);
-                        }
-                    } else if (use_model_angles) {
-                        int16_t rows[3][3];
-                        ll_native_model_rotation(model_angles, rows);
-                        for (unsigned r = 0; r < 3; r++) {
-                            int64_t sum = 0;
-                            for (unsigned c = 0; c < 3; c++)
-                                sum += (int64_t)rows[r][c] * vertex->position[c];
-                            world[r] = model_pos[r] + (int32_t)(sum / 4096);
-                        }
-                    } else {
-                        world[0] = model_pos[0] + vertex->position[0];
-                        world[1] = model_pos[1] + vertex->position[1];
-                        world[2] = model_pos[2] + vertex->position[2];
-                    }
-                    for (unsigned i = 0; i < 3; i++) {
-                        dot_w += (int64_t)cam_rows[2][i] * world[i];
-                        dot_r += (int64_t)cam_rows[2][i] * menu_camera.reference[i];
-                    }
-                    proj_z[submitted] = (int32_t)((dot_w - dot_r) / 4096) + (int32_t)menu_camera_depth;
                 }
                 if (!all_valid) continue;
-
-                /* Reject faces with excessive Z range (perspective
-                 * distortion across a single polygon). */
-                int32_t z_min = proj_z[0], z_max = proj_z[0];
-                for (uint32_t s = 1; s < (quad ? 6u : 3u); s++) {
-                    if (proj_z[s] < z_min) z_min = proj_z[s];
-                    if (proj_z[s] > z_max) z_max = proj_z[s];
-                }
-                if (z_max - z_min > z_min / 2) continue;
 
                 /* FUN_0048c5b0 submits geometry 0,1,3,2 against attributes
                  * in strip order. Keep source geometry on its perimeter. */
