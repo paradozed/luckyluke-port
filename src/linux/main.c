@@ -2802,6 +2802,9 @@ int main(void)
         menu_asset_errors |= asset_config.mount_error
                                  ? MENU_ASSET_CD_MOUNT_ERROR
                                  : MENU_ASSET_CONFIG_ERROR;
+    } else {
+        fprintf(stderr, "DEBUG: cd_mount=%s language=%c\n",
+                asset_config.cd_mount, asset_config.language_code);
     }
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -2863,6 +2866,17 @@ int main(void)
     menu_audio_init();
     if (ll_level_has_bib(&game_level) && menu_biz_loaded)
         load_and_execute_menu_script();
+
+    /* Diagnostic: report exactly why the menu assets are not available. */
+    if (!ll_level_has_bib(&game_level)) {
+        fprintf(stderr, "DEBUG: menu BIB not loaded (load_menu_bib failed)\n");
+    }
+    if (!menu_biz_loaded) {
+        fprintf(stderr, "DEBUG: menu BIZ not loaded (load_menu_biz failed)\n");
+    }
+    if (!menu_program_loaded) {
+        fprintf(stderr, "DEBUG: menu SOOL program not loaded (option.cod not executed)\n");
+    }
 
     SDL_GL_SetSwapInterval(1);
     {
