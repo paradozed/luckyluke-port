@@ -2697,57 +2697,80 @@ static void render_menu(int selection, int page, unsigned int tick)
     glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    /* Draw menu title and selection overlay */
-    glColor3f(1.0f, 0.8f, 0.2f);
-    draw_text("LUCKY LUKE", WINDOW_WIDTH / 2 - 120, 120, 3, 1.0f, 0.8f, 0.2f);
 
-    /* Draw menu buttons */
-    int button_w = 200;
-    int button_h = 48;
-    int button_x = WINDOW_WIDTH / 2 - button_w / 2;
-    int button_y_start = 260;
-    int button_spacing = 72;
-    const char *button_labels[2] = {"GAME", "OPTIONS"};
-
-    for (int i = 0; i < 2; i++) {
-        int button_y = button_y_start + i * button_spacing;
-        int is_selected = (selection == i);
-
-        glColor4f(0.15f, 0.18f, 0.25f, 0.85f);
-        if (is_selected) {
-            glColor4f(0.25f, 0.35f, 0.55f, 0.95f);
-        }
-        glBegin(GL_QUADS);
-        glVertex2i(button_x, button_y);
-        glVertex2i(button_x + button_w, button_y);
-        glVertex2i(button_x + button_w, button_y + button_h);
-        glVertex2i(button_x, button_y + button_h);
-        glEnd();
-
-        glColor3f(0.8f, 0.8f, 0.8f);
-        glBegin(GL_LINE_LOOP);
-        glVertex2i(button_x, button_y);
-        glVertex2i(button_x + button_w, button_y);
-        glVertex2i(button_x + button_w, button_y + button_h);
-        glVertex2i(button_x, button_y + button_h);
-        glEnd();
-
-        draw_text(button_labels[i],
-                  WINDOW_WIDTH / 2 - (int)strlen(button_labels[i]) * 4 * 2,
-                  button_y + button_h / 2 - 8,
-                  2, 1.0f, 1.0f, 1.0f);
-
-        if (is_selected) {
-            glColor3f(1.0f, 0.8f, 0.0f);
-            glBegin(GL_TRIANGLES);
-            glVertex2i(button_x - 40, button_y + button_h / 2);
-            glVertex2i(button_x - 20, button_y + button_h / 2 - 10);
-            glVertex2i(button_x - 20, button_y + button_h / 2 + 10);
-            glEnd();
+    /* Detect whether SOOL has positioned original menu UI elements
+     * (title, buttons, arrows, cursors) via BIZ screen sprites or
+     * sprite groups. If so, the original assets drive the menu and
+     * procedural drawing is only a fallback. */
+    int has_sool_ui = 0;
+    for (size_t i = 0; i < menu_scene_object_count && !has_sool_ui; i++) {
+        if (menu_scene_objects[i].is_biz_sprite && menu_sprite_has_screen[i])
+            has_sool_ui = 1;
+    }
+    for (unsigned id = 0; id < 256 && !has_sool_ui; id++) {
+        if (menu_sprite_groups[id].enabled == 1) {
+            for (unsigned index = 0; index < menu_sprite_groups[id].count; index++) {
+                if (menu_sprite_groups[id].children[index].present) {
+                    has_sool_ui = 1;
+                    break;
+                }
+            }
         }
     }
 
-    draw_text("ESC TO QUIT", WINDOW_WIDTH / 2 - 70, 420, 1, 0.6f, 0.6f, 0.6f);
+    if (!has_sool_ui) {
+        /* Draw menu title and selection overlay (procedural fallback) */
+        glColor3f(1.0f, 0.8f, 0.2f);
+        draw_text("LUCKY LUKE", WINDOW_WIDTH / 2 - 120, 120, 3, 1.0f, 0.8f, 0.2f);
+
+        /* Draw menu buttons */
+        int button_w = 200;
+        int button_h = 48;
+        int button_x = WINDOW_WIDTH / 2 - button_w / 2;
+        int button_y_start = 260;
+        int button_spacing = 72;
+        const char *button_labels[2] = {"GAME", "OPTIONS"};
+
+        for (int i = 0; i < 2; i++) {
+            int button_y = button_y_start + i * button_spacing;
+            int is_selected = (selection == i);
+
+            glColor4f(0.15f, 0.18f, 0.25f, 0.85f);
+            if (is_selected) {
+                glColor4f(0.25f, 0.35f, 0.55f, 0.95f);
+            }
+            glBegin(GL_QUADS);
+            glVertex2i(button_x, button_y);
+            glVertex2i(button_x + button_w, button_y);
+            glVertex2i(button_x + button_w, button_y + button_h);
+            glVertex2i(button_x, button_y + button_h);
+            glEnd();
+
+            glColor3f(0.8f, 0.8f, 0.8f);
+            glBegin(GL_LINE_LOOP);
+            glVertex2i(button_x, button_y);
+            glVertex2i(button_x + button_w, button_y);
+            glVertex2i(button_x + button_w, button_y + button_h);
+            glVertex2i(button_x, button_y + button_h);
+            glEnd();
+
+            draw_text(button_labels[i],
+                      WINDOW_WIDTH / 2 - (int)strlen(button_labels[i]) * 4 * 2,
+                      button_y + button_h / 2 - 8,
+                      2, 1.0f, 1.0f, 1.0f);
+
+            if (is_selected) {
+                glColor3f(1.0f, 0.8f, 0.0f);
+                glBegin(GL_TRIANGLES);
+                glVertex2i(button_x - 40, button_y + button_h / 2);
+                glVertex2i(button_x - 20, button_y + button_h / 2 - 10);
+                glVertex2i(button_x - 20, button_y + button_h / 2 + 10);
+                glEnd();
+            }
+        }
+
+        draw_text("ESC TO QUIT", WINDOW_WIDTH / 2 - 70, 420, 1, 0.6f, 0.6f, 0.6f);
+    }
     draw_menu_asset_errors();
 }
 
