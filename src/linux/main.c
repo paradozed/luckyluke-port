@@ -2558,13 +2558,42 @@ static void render_menu(int selection, int page, unsigned int tick)
     glClearColor(0.012f, 0.018f, 0.045f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     menu_render_background_sprites();
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glDisable(GL_DEPTH_TEST);
+
+    /* ---- Render 3D BIB scene objects with camera projection ---- */
+    glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
+    if (menu_camera.has_reference && menu_camera.projection != 0) {
+        /* Original driver: project world-space vertices through camera,
+         * scale from DirectDraw 512x256 surface to 640x480 window. */
+        double focal = (double)menu_camera.projection * (640.0 / 448.0);
+        double aspect = (double)WINDOW_WIDTH / (double)WINDOW_HEIGHT;
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glFrustum(-focal, focal,
+                  -focal / aspect, focal / aspect,
+                  1.0, 200000.0);
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+        int16_t rows[3][3];
+        int32_t translation[3];
+        ll_native_camera_view(menu_camera.pitch, menu_camera.yaw,
+                              menu_camera.reference, menu_camera_depth,
+                              rows, translation);
+        GLdouble view[16] = {0};
+        for (unsigned r = 0; r < 3; r++)
+            for (unsigned c = 0; c < 3; c++)
+                view[c * 4u + r] = (double)rows[r][c] / 4096.0;
+        view[15] = 1.0;
+        for (unsigned r = 0; r < 3; r++) view[12u + r] = (double)translation[r];
+        glMultMatrixd(view);
+    } else {
+        /* No camera yet: fall back to screen-space orthographic. */
+        glMatrixMode(GL_PROJECTION);
+        glLoadIdentity();
+        glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+    }
     /* ---- Advance BIZ sprite animations (time-based frame progression) ---- */
     for (size_t object_index = 0; object_index < menu_scene_object_count; object_index++) {
         if (!menu_scene_objects[object_index].is_biz_sprite ||
