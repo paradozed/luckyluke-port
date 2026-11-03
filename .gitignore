@@ -9,6 +9,7 @@ iso_extract/
 orig/lucky.luke.iso
 rebuild/
 *.o
+wav/
 
 # Python
 __pycache__/
