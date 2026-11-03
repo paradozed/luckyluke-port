@@ -124,7 +124,7 @@ int ll_sool_program_open(LL_SoolProgram *program,
     uint64_t table_end;
     if (program == NULL) return 0;
     memset(program, 0, sizeof(*program));
-    if (data == NULL || size < 10 || memcmp(data, "SOOL", 4) != 0)
+    if (data == NULL || size < 10 || size > UINT32_MAX || memcmp(data, "SOOL", 4) != 0)
         return vm_error(program, "SOOL signature/header is missing or truncated");
     if (read_u32le(data + 4) != size)
         return vm_error(program, "SOOL declared size does not match the file length");
@@ -141,8 +141,9 @@ int ll_sool_program_open(LL_SoolProgram *program,
     for (uint32_t i = 0; i < count; i++) {
         LL_SoolFunction *fn = &program->functions[i];
         uint32_t offset = read_u32le(data + 10u + i * 4u);
+        uint32_t next = i + 1u < count ? read_u32le(data + 10u + (i+1u)*4u) : (uint32_t)size;
         uint32_t block_size;
-        if (offset < table_end || offset > size || size - offset < 16u ||
+        if (offset < table_end || offset > size || next > size || next <= offset || next-offset < 16u ||
             (i != 0 && offset <= program->functions[i - 1u].offset)) {
             ll_sool_program_close(program);
             return vm_error(program, "SOOL function offset is invalid or unordered");
@@ -156,7 +157,7 @@ int ll_sool_program_open(LL_SoolProgram *program,
         fn->initial_state = read_u16le(data + offset + 10u);
         block_size = read_u16le(data + offset + 12u);
         fn->state_count = read_u16le(data + offset + 14u);
-        if (block_size < 16u || block_size > size - offset ||
+        if (block_size < 16u || block_size > next - offset ||
             fn->state_count == 0 || fn->state_count > 4096 ||
             (fn->initial_state != UINT16_MAX && fn->initial_state >= fn->state_count) ||
             16u + (uint64_t)fn->state_count * 2u > block_size ||
@@ -164,10 +165,19 @@ int ll_sool_program_open(LL_SoolProgram *program,
             ll_sool_program_close(program);
             return vm_error(program, "SOOL function header/state table is malformed");
         }
-        fn->size = block_size;
-        if ((fn->conditions_start != UINT16_MAX && fn->conditions_start >= block_size) ||
-            (fn->data_start != UINT16_MAX && fn->data_start >= block_size) ||
-            (fn->virtual_start != UINT16_MAX && fn->virtual_start >= block_size)) {
+        /* Header+12 ends state code, not the complete directory span.
+         * Abilene stores conditions and virtual pairs after this boundary.
+         * Bound them by the next function, never by the whole file alone. */
+        fn->size = next-offset;
+        if ((fn->conditions_start != UINT16_MAX &&
+             (fn->conditions_start < block_size || fn->conditions_start >= fn->size)) ||
+            (fn->data_start != UINT16_MAX &&
+             (fn->data_start < 16u+fn->state_count*2u || fn->data_start >= fn->code_start)) ||
+            (fn->virtual_count && (fn->virtual_start == UINT16_MAX ||
+             fn->virtual_start < block_size ||
+             (uint64_t)fn->virtual_start+fn->virtual_count*4u > fn->size)) ||
+            (fn->conditions_start != UINT16_MAX && fn->virtual_count &&
+             fn->conditions_start >= fn->virtual_start)) {
             ll_sool_program_close(program);
             return vm_error(program, "SOOL data/condition directory exceeds its function block");
         }
@@ -239,9 +249,9 @@ static int vm_pop(LL_SoolVM *vm, uint16_t *value)
     return 1;
 }
 
-int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index,
+static int execute(const LL_SoolProgram *program, uint16_t function_index,
                           uint16_t state_index, LL_SoolVM *vm,
-                          LL_SoolDispatch dispatch, void *userdata)
+                          LL_SoolDispatch dispatch, void *userdata, int conditions)
 {
     const LL_SoolFunction *fn;
     uint32_t pc, end;
@@ -260,7 +270,12 @@ int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index
     end = (uint32_t)fn->offset +
           (state_index + 1u < fn->state_count ? fn->state_offsets[state_index + 1u]
                                              : fn->code_end);
-    if (vm->suspended && vm->resume_root_function == function_index &&
+    if (conditions) {
+        if (fn->conditions_start == UINT16_MAX) return 1;
+        pc=fn->offset+fn->conditions_start;
+        end=fn->offset+(fn->virtual_count ? fn->virtual_start : fn->size);
+    }
+    if (!conditions && vm->suspended && vm->resume_root_function == function_index &&
         vm->resume_root_state == state_index) {
         if (vm->resume_function >= program->function_count || vm->return_depth > 64) return 0;
         function_index = vm->resume_function;
@@ -277,13 +292,14 @@ int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index
     vm->steps = 0;
     /* FUN_004219b0 executes at most 30 ordinary instructions per update;
      * mask 4 requests synchronous execution, still bounded here. */
-    while (pc < end && vm->steps < ((vm->state_flags & 4u) ? 100000u : 30u)) {
+    while (pc < end && vm->steps < ((conditions || (vm->state_flags & 4u)) ? 100000u : 30u)) {
         vm->steps++;
         LL_SoolInstruction ins;
         uint16_t a, b;
         if (!ll_sool_decode_instruction(program->data, program->size, pc, &ins) ||
             pc + ins.size > end) return 0;
         vm->last_instruction_offset = pc - fn->offset;
+        vm->last_function = function_index;
         vm->last_opcode = ins.opcode;
         switch (ins.opcode) {
         case 0x00: case 0x01: return 1;
@@ -310,12 +326,14 @@ int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index
         case 0x03:
             if (!vm_pop(vm, &a)) return 0;
             if (a == 0) {
-                if (ins.operands[0] < fn->code_start || ins.operands[0] >= fn->code_end) return 0;
+                if (ins.operands[0] < (conditions ? fn->conditions_start : fn->code_start) ||
+                    ins.operands[0] >= (conditions ? end-fn->offset : fn->code_end)) return 0;
                 pc = (uint32_t)fn->offset + ins.operands[0];
             } else pc += ins.size;
             break;
         case 0x04:
-            if (ins.operands[0] < fn->code_start || ins.operands[0] >= fn->code_end) return 0;
+            if (ins.operands[0] < (conditions ? fn->conditions_start : fn->code_start) ||
+                ins.operands[0] >= (conditions ? end-fn->offset : fn->code_end)) return 0;
             pc = (uint32_t)fn->offset + ins.operands[0]; break;
         case 0x05: case 0x06: case 0x09:
             if (!vm_push(vm, ins.operands[0])) return 0;
@@ -357,7 +375,8 @@ int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index
             pc++; break;
         case 0x0e:
             if (vm->current_state == (int16_t)ins.operands[0]) {
-                if (ins.operands[1] < fn->code_start || ins.operands[1] >= fn->code_end) return 0;
+                if (ins.operands[1] < (conditions ? fn->conditions_start : fn->code_start) ||
+                    ins.operands[1] >= (conditions ? end-fn->offset : fn->code_end)) return 0;
                 pc = (uint32_t)fn->offset + ins.operands[1];
             } else if (!vm_push(vm, ins.operands[0])) return 0;
             else pc += ins.size;
@@ -468,14 +487,24 @@ int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index
                 vm->pending_state = a;
                 vm->has_pending_transition = 1;
             }
-            pc++; break;
+            pc++;
+            if (vm->has_pending_transition && !conditions) goto suspend_execution;
+            break;
         case 0x38:
             if (!vm_pop(vm, &a) || !vm_pop(vm, &b)) return 0;
             if (a >= program->function_count || a >= 256u ||
                 (b != UINT16_MAX && b >= program->functions[a].state_count)) return 0;
-            vm->member_states[a] = b;
-            vm->member_state_requested[a] = 1;
-            pc++; break;
+            if (vm->member_states[a]!=b) {
+                vm->member_states[a] = b;
+                vm->member_state_requested[a] = 1;
+                if (a==function_index) {
+                    vm->pending_function=a;vm->pending_state=b;
+                    vm->has_pending_transition=1;
+                }
+            }
+            pc++;
+            if (vm->has_pending_transition && !conditions) goto suspend_execution;
+            break;
         case 0x39:
             if (!vm_pop(vm, &a) || a >= fn->state_count) return 0;
             /* Native opcode 0x39 calls a state body, saving function and
@@ -528,10 +557,24 @@ int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index
     if (pc < end) goto suspend_execution;
     return pc == end;
 suspend_execution:
+    if (conditions) return 0; /* conditions must terminate within their budget */
     vm->resume_pc = pc;
     vm->resume_end = end;
     vm->resume_function = function_index;
     vm->return_depth = return_depth;
     vm->suspended = 1;
     return 1;
+}
+
+int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index,
+                          uint16_t state_index, LL_SoolVM *vm,
+                          LL_SoolDispatch dispatch, void *userdata)
+{
+    return execute(program,function_index,state_index,vm,dispatch,userdata,0);
+}
+
+int ll_sool_execute_conditions(const LL_SoolProgram *program, uint16_t function_index,
+                               LL_SoolVM *vm, LL_SoolDispatch dispatch, void *userdata)
+{
+    return execute(program,function_index,0,vm,dispatch,userdata,1);
 }

@@ -79,6 +79,12 @@ int main(void)
     program.size=sizeof(state_code);
     assert(ll_sool_execute_state(&program,0,0,&vm,NULL,NULL));
     assert(vm.member_state_requested[0] && vm.member_states[0]==0);
+    /* Native state requests clear the target's burst flag immediately.
+     * No following comparison executes before the scheduler installs state0. */
+    assert(vm.suspended && vm.stack_size==0 && vm.has_pending_transition);
+    vm.has_pending_transition=0;
+    vm.current_state=0;
+    assert(ll_sool_execute_state(&program,0,0,&vm,NULL,NULL));
     assert(vm.stack_size==1 && vm.stack[0]==1);
     assert(vm.locals[255]==0x1234);
     static const unsigned char disable_code[] = {

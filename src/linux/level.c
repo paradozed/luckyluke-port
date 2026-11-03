@@ -114,6 +114,21 @@ static int decode_pcx_to_rgba(const unsigned char *pcx_data, size_t pcx_size,
     return 1;
 }
 
+static int store_background(LL_Level *level, unsigned char *rgba, int width, int height)
+{
+    /* The presenter reads its own dimensions, not the window dimensions.
+     * An original 512x256 title cannot be uploaded as a 640x480 surface. */
+    if (level->renderer.width!=width || level->renderer.height!=height) {
+        LL_Renderer renderer={0};
+        if (!ll_renderer_init(&renderer,width,height)) { free(rgba);return 0; }
+        ll_renderer_destroy(&level->renderer);level->renderer=renderer;
+    }
+    free(level->bg_rgba);
+    level->bg_rgba=rgba;level->bg_width=width;level->bg_height=height;
+    level->bg_loaded=1;
+    return 1;
+}
+
 int ll_level_load_background_from_archive(LL_Level *level,
                                           const unsigned char *archive_data,
                                           size_t archive_size,
@@ -165,13 +180,7 @@ int ll_level_load_background_from_archive(LL_Level *level,
     }
     free(payload_copy);
 
-    /* Store decoded background, replacing any previous one. */
-    free(level->bg_rgba);
-    level->bg_rgba = rgba;
-    level->bg_width = width;
-    level->bg_height = height;
-    level->bg_loaded = 1;
-    return 1;
+    return store_background(level,rgba,width,height);
 }
 
 int ll_level_load_background_from_pcx(LL_Level *level,
@@ -182,12 +191,7 @@ int ll_level_load_background_from_pcx(LL_Level *level,
     int width = 0, height = 0;
     if (level == NULL || pcx_data == NULL || pcx_size == 0 ||
         !decode_pcx_to_rgba(pcx_data, pcx_size, &rgba, &width, &height)) return 0;
-    free(level->bg_rgba);
-    level->bg_rgba = rgba;
-    level->bg_width = width;
-    level->bg_height = height;
-    level->bg_loaded = 1;
-    return 1;
+    return store_background(level,rgba,width,height);
 }
 
 int ll_level_set_state(LL_Level *level, int state)

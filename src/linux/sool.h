@@ -20,7 +20,7 @@ typedef struct {
 
 typedef struct {
     uint32_t offset;       /* offset from the start of the SOOL file */
-    uint32_t size;
+    uint32_t size;         /* full span through conditions/virtual directory */
     uint16_t code_start;
     uint16_t data_start;
     uint16_t virtual_start;
@@ -57,6 +57,7 @@ typedef struct {
     size_t stack_size;
     uint32_t steps;
     uint32_t last_instruction_offset;
+    uint16_t last_function;
     uint8_t last_opcode;
     int16_t current_state;
     uint16_t state_flags;
@@ -86,6 +87,10 @@ const char *ll_sool_program_error(const LL_SoolProgram *program);
 int ll_sool_execute_state(const LL_SoolProgram *program, uint16_t function_index,
                           uint16_t state_index, LL_SoolVM *vm,
                           LL_SoolDispatch dispatch, void *userdata);
+/* Run the separate condition stream to its branch terminator. Use a scratch
+ * VM with shared locals/members and current_state; body continuation is separate. */
+int ll_sool_execute_conditions(const LL_SoolProgram *program, uint16_t function_index,
+                               LL_SoolVM *vm, LL_SoolDispatch dispatch, void *userdata);
 
 /* Decode a single VM instruction. Returns 1 on success and 0 when offset is
  * outside the script or a known instruction is truncated. */

@@ -25,7 +25,7 @@ Port du jeu *Lucky Luke* (version PC Windows, années 1990) vers Linux x64 natif
 | Animation 3D des modèles BIB (frames, fondu enchaîné, boucle/one-shot) | ✅ |
 | Animation sprite BIZ (progression temporelle par durée de frame) | ✅ |
 | Scène 3D BIB : rendu des modèles géométriques du menu | ✅ |
-| Niveau 1 : Abilene (back.pcx, objets, pièces, joueur) | ✅ (partiel/procédural) |
+| Abilene : chargement/exécution SOOL, trace et initialisation native partielle | ✅ (diagnostic ; gameplay incomplet) |
 | Collisions / géométrie de niveau depuis les données originales | ❌ |
 | Lecture AVI (intro) | ❌ (sauf `skip_intro` déjà fonctionnel) |
 | Sauvegarde des options / application des profils au gameplay | ❌ |
@@ -76,9 +76,35 @@ Le port lit les assets depuis `cd_mount`. Les fichiers clés du menu principal :
 - `CINEMA/OPTION/option_<lang>.bib` — scène BIB localisée (ex: `option_e.bib`)
 - `CINEMA/OPTION/option_<lang>.biz` — ressources BIZ localisées (objets, sprites, tuiles, textures, sons)
 - `win/graphics/font.kxp` — logos de démarrage (APLOGO.PCX, LI_*.PCX)
-- `abilene/abilene.kxp` — ressources du premier niveau
+- `ABILENE/abilene.cod` — véritable script SOOL du premier niveau
+- `ABILENE/abilene.bib` — catalogue, modèles et poses d'Abilene
+- `image/Abilene.pcx` — carte de présentation du niveau, utilisée sur l'écran de diagnostic
+
+Les ressources natives d'Abilene comprennent aussi `abilene.biz`, dont
+l'intégration au rendu du niveau reste à faire. L'archive `abilene.kxp` du
+prototype n'est pas présente dans la copie examinée ; le moteur SOOL n'en
+dépend pas.
 
 Les fichiers ne sont jamais modifiés ; toutes les sorties générées vont dans `build/`.
+
+Le véritable `ABILENE/abilene.cod` s'exécute maintenant lorsque le menu SOOL
+demande l'état 2 via sa commande `0x12`. Le port initialise les paramètres
+récupérés et enregistre les modèles/poses reconnus. Les commandes et variables
+manquantes arrêtent explicitement leur contexte avec une trace ; le niveau
+ne possède pas encore de gameplay natif fonctionnel. Le prototype avec joueur
+et pièces procéduraux n'est plus lancé par ce chemin.
+
+Pour tracer le script sans fenêtre ni SDL :
+
+```bash
+./build/linux/abilene-trace /chemin/ABILENE/abilene.cod /chemin/ABILENE/abilene.bib 24
+```
+
+Le code de sortie `3` signifie que des contextes attendent des fonctions
+natives à porter ; `2` signale une entrée invalide et `0` une exécution sans
+blocage signalé (sans prouver que le script entier est terminé).
+`LL_TRACE_LEVEL_SOOL=1` active aussi les appels reconnus dans le jeu.
+Voir [l'état du portage SOOL d'Abilene](docs/ABILENE_SOOL.md).
 
 ## Utilisation
 
@@ -93,11 +119,10 @@ Les fichiers ne sont jamais modifiés ; toutes les sorties générées vont dans
 - Échap : revenir au menu principal ou quitter
 - Souris : survol et clic fonctionnent aussi
 
-### Contrôles niveau (Abilene)
+### Abilene
 
-- Gauche / Droite ou A / D : se déplacer
-- Espace / Haut / W : sauter
-- Échap : retourner au menu
+L'écran indique l'état du script et les fonctions natives manquantes.
+Échap retourne au menu. Déplacements et sauts attendent le contrôleur original.
 
 ## Structure du dépôt
 

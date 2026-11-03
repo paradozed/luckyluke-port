@@ -17,6 +17,7 @@
 #include "sool.h"
 #include "audio_mix.h"
 #include "native_camera.h"
+#include "level_script.h"
 
 /* All scene/UI math uses the original 640x480 display-list surface.
  * The configured window size is applied once through the GL viewport. */
@@ -144,6 +145,9 @@ static struct {
 } menu_camera;
 static unsigned int menu_asset_errors;
 static unsigned char *abilene_cod_data;
+static LL_LevelScript abilene_script;
+static uint32_t abilene_script_tick;
+static int requested_game_state;
 static unsigned char *abilene_archive_data;
 static unsigned char *fixgfx_archive_data;
 
@@ -215,12 +219,19 @@ static int load_abilene_assets(void)
         abilene_cod_data = read_cd_file("ABILENE/abilene.cod", &size);
         if (abilene_cod_data == NULL) {
             fprintf(stderr, "ERROR: cannot read CD script ABILENE/abilene.cod\n");
-        } else if (size >= 4 && memcmp(abilene_cod_data, "SOOL", 4) == 0) {
-            fprintf(stderr, "INFO: found ABILENE/abilene.cod (SOOL); native SOOL level-script execution is not implemented yet\n");
-        } else if (!ll_level_load_cod_from_memory(&game_level, abilene_cod_data, size)) {
-            fprintf(stderr, "WARNING: ABILENE/abilene.cod uses an unsupported script format\n");
-            free(abilene_cod_data);
-            abilene_cod_data = NULL;
+        } else {
+            size_t bib_size=0;
+            unsigned char *bib=read_cd_file("ABILENE/abilene.bib",&bib_size);
+            if (!bib || !ll_level_script_open(&abilene_script,abilene_cod_data,size,
+                    bib,bib_size,getenv("LL_TRACE_LEVEL_SOOL")?stderr:NULL)) {
+                fprintf(stderr,"ERROR: cannot load original Abilene SOOL/BIB: %s\n",
+                    bib?abilene_script.error:"missing ABILENE/abilene.bib");
+            } else {
+                ll_level_script_update(&abilene_script);
+                ll_level_script_report(&abilene_script,stderr);
+                abilene_script_tick=(uint32_t)((uint64_t)SDL_GetTicks()*24u/1000u);
+            }
+            free(bib);
         }
     }
 
@@ -781,7 +792,13 @@ static int menu_sool_dispatch(uint8_t opcode, uint16_t *stack, size_t *stack_siz
                 fprintf(stderr, " %d", (int16_t)stack[*stack_size - 1u - arg]);
             fputc('\n', stderr);
         }
-        if ((command==0xc8 || command==0xd0) && count==2u) {
+        if (command==0x12 && count==2u) {
+            /* FUN_00410250 requests an outer-loop state change. Defer until
+             * after SOOL returns; freeing its scene here would invalidate VMs. */
+            uint16_t target=stack[*stack_size-2u];
+            if (target==2) requested_game_state=2;
+            else fprintf(stderr,"ERROR: requested gameplay state%u is not ported\n",target);
+        } else if ((command==0xc8 || command==0xd0) && count==2u) {
             if (command==0xc8) menu_audio_base=stack[*stack_size-2u];
             else menu_audio_multiplier=stack[*stack_size-2u];
         } else if ((command==0xc9 || command==0xce || command==0xcf) && count==2u) {
@@ -1898,182 +1915,6 @@ static void draw_menu_asset_errors(void)
     }
 }
 
-static void draw_box(float center_x, float bottom_y, float center_z,
-                     float width, float height, float depth,
-                     float red, float green, float blue)
-{
-    float left = center_x - width * 0.5f;
-    float right = center_x + width * 0.5f;
-    float top = bottom_y + height;
-    float front = center_z + depth * 0.5f;
-    float back = center_z - depth * 0.5f;
-
-    glBegin(GL_QUADS);
-    glColor3f(red, green, blue);
-    glVertex3f(left, bottom_y, front); glVertex3f(right, bottom_y, front);
-    glVertex3f(right, top, front); glVertex3f(left, top, front);
-    glColor3f(red * 0.62f, green * 0.62f, blue * 0.68f);
-    glVertex3f(left, bottom_y, back); glVertex3f(left, bottom_y, front);
-    glVertex3f(left, top, front); glVertex3f(left, top, back);
-    glColor3f(red * 0.43f, green * 0.43f, blue * 0.52f);
-    glVertex3f(right, bottom_y, back); glVertex3f(left, bottom_y, back);
-    glVertex3f(left, top, back); glVertex3f(right, top, back);
-    glColor3f(red * 0.76f, green * 0.76f, blue * 0.82f);
-    glVertex3f(right, bottom_y, front); glVertex3f(right, bottom_y, back);
-    glVertex3f(right, top, back); glVertex3f(right, top, front);
-    glColor3f(red * 0.72f, green * 0.72f, blue * 0.78f);
-    glVertex3f(left, top, front); glVertex3f(right, top, front);
-    glVertex3f(right, top, back); glVertex3f(left, top, back);
-    glColor3f(red * 0.34f, green * 0.34f, blue * 0.42f);
-    glVertex3f(left, bottom_y, back); glVertex3f(right, bottom_y, back);
-    glVertex3f(right, bottom_y, front); glVertex3f(left, bottom_y, front);
-    glEnd();
-}
-
-static void draw_window(float x, float y, float z, float width, float height,
-                        float glow)
-{
-    glColor3f(glow, glow * 0.67f, glow * 0.33f);
-    glBegin(GL_QUADS);
-    glVertex3f(x, y, z); glVertex3f(x + width, y, z);
-    glVertex3f(x + width, y + height, z); glVertex3f(x, y + height, z);
-    glEnd();
-}
-
-static void draw_building(float x, float z, float width, float height,
-                          float red, float green, float blue, int columns)
-{
-    int row;
-    int column;
-    float bottom = -2.55f;
-
-    draw_box(x, bottom, z, width, height, 1.0f, red, green, blue);
-    draw_box(x, bottom + height, z + 0.04f, width + 0.22f, 0.14f, 1.25f,
-             red * 0.58f, green * 0.50f, blue * 0.50f);
-    for (row = 0; row < 2; row++) {
-        for (column = 0; column < columns; column++) {
-            float window_x = x - width * 0.34f +
-                width * 0.68f * (float)column / (float)(columns > 1 ? columns - 1 : 1);
-            float window_y = bottom + 0.92f + (float)row * 1.18f;
-            float glow = (row == 0 && column % 2 == 0) ? 0.72f : 0.24f;
-            draw_window(window_x, window_y, z + 0.51f, 0.26f, 0.46f, glow);
-        }
-    }
-    draw_box(x, bottom + 0.48f, z + 0.54f, 0.78f, 0.96f, 0.12f,
-             0.09f, 0.055f, 0.04f);
-}
-
-static void draw_stars_and_moon(void)
-{
-    static const float stars[][3] = {
-        {-8.0f, 5.2f, -23.0f}, {-6.0f, 6.1f, -24.0f}, {-3.0f, 4.8f, -22.0f},
-        {0.0f, 6.5f, -26.0f}, {2.1f, 5.3f, -24.0f}, {4.0f, 6.2f, -25.0f},
-        {7.0f, 4.8f, -24.0f}, {8.3f, 6.0f, -27.0f}, {-7.1f, 3.8f, -26.0f},
-        {-1.0f, 5.8f, -24.0f}, {5.8f, 3.9f, -22.0f}, {1.0f, 4.3f, -27.0f}
-    };
-    static const float moon[][2] = {
-        {0.0f, -0.82f}, {0.41f, -0.71f}, {0.71f, -0.41f}, {0.82f, 0.0f},
-        {0.71f, 0.41f}, {0.41f, 0.71f}, {0.0f, 0.82f}, {-0.41f, 0.71f},
-        {-0.71f, 0.41f}, {-0.82f, 0.0f}, {-0.71f, -0.41f}, {-0.41f, -0.71f}
-    };
-    size_t index;
-
-    glPointSize(2.0f);
-    glBegin(GL_POINTS);
-    glColor3f(0.82f, 0.82f, 0.72f);
-    for (index = 0; index < sizeof(stars) / sizeof(stars[0]); index++) {
-        glVertex3f(stars[index][0], stars[index][1], stars[index][2]);
-    }
-    glEnd();
-
-    glColor3f(0.94f, 0.85f, 0.63f);
-    glBegin(GL_TRIANGLE_FAN);
-    glVertex3f(5.4f, 4.0f, -11.0f);
-    for (index = 0; index < sizeof(moon) / sizeof(moon[0]); index++) {
-        glVertex3f(5.4f + moon[index][0], 4.0f + moon[index][1], -11.0f);
-    }
-    glVertex3f(5.4f, 3.18f, -11.0f);
-    glEnd();
-}
-
-static void draw_western_scene(float swing_angle)
-{
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glFrustum(-0.72, 0.72, -0.54, 0.54, 1.0, 90.0);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glTranslatef(0.0f, 0.0f, -18.0f);
-    glDisable(GL_DEPTH_TEST);
-
-    glBegin(GL_QUADS);
-    glColor3f(0.025f, 0.055f, 0.13f);
-    glVertex3f(-100.0f, 60.0f, -34.0f);
-    glVertex3f(100.0f, 60.0f, -34.0f);
-    glColor3f(0.17f, 0.11f, 0.15f);
-    glVertex3f(100.0f, -12.0f, -34.0f);
-    glVertex3f(-100.0f, -12.0f, -34.0f);
-    glEnd();
-
-    draw_stars_and_moon();
-    glEnable(GL_DEPTH_TEST);
-    draw_box(0.0f, -2.72f, -12.0f, 44.0f, 0.10f, 50.0f,
-             0.13f, 0.105f, 0.095f);
-    draw_building(-12.0f, -15.0f, 4.3f, 3.4f, 0.20f, 0.13f, 0.12f, 3);
-    draw_building(-7.3f, -16.0f, 4.8f, 4.2f, 0.24f, 0.16f, 0.13f, 3);
-    draw_building(1.0f, -17.0f, 5.0f, 3.8f, 0.20f, 0.14f, 0.13f, 3);
-    draw_building(6.7f, -15.0f, 4.5f, 4.6f, 0.22f, 0.15f, 0.14f, 3);
-    draw_building(12.1f, -16.0f, 4.2f, 3.4f, 0.18f, 0.12f, 0.12f, 2);
-
-    draw_box(-11.0f, -2.62f, -7.0f, 6.0f, 4.2f, 2.0f, 0.25f, 0.15f, 0.105f);
-    draw_box(-11.0f, 1.58f, -7.0f, 6.4f, 0.20f, 2.3f, 0.13f, 0.09f, 0.075f);
-    draw_box(10.6f, -2.62f, -7.0f, 5.4f, 5.0f, 2.0f, 0.20f, 0.13f, 0.11f);
-    draw_box(10.6f, 2.38f, -7.0f, 5.8f, 0.20f, 2.3f, 0.12f, 0.085f, 0.07f);
-
-    /* Scale around the boots to keep Lucky grounded while making the silhouette readable. */
-    glPushMatrix();
-    glTranslatef(-3.2f, -2.55f, -2.6f);
-    glScalef(1.55f, 1.55f, 1.55f);
-    glTranslatef(3.2f, 2.55f, 2.6f);
-    draw_box(-3.2f, -2.55f, -2.6f, 0.40f, 1.15f, 0.48f, 0.15f, 0.11f, 0.085f);
-    draw_box(-2.35f, -2.55f, -2.6f, 0.40f, 1.15f, 0.48f, 0.15f, 0.11f, 0.085f);
-    draw_box(-3.2f, -1.42f, -2.6f, 1.50f, 1.40f, 0.75f, 0.76f, 0.61f, 0.38f);
-    draw_box(-3.2f, -1.20f, -2.17f, 1.15f, 0.22f, 0.12f, 0.70f, 0.12f, 0.10f);
-    draw_box(-3.2f, 0.02f, -2.6f, 0.62f, 0.70f, 0.58f, 0.79f, 0.63f, 0.43f);
-    draw_box(-3.2f, 0.67f, -2.6f, 1.34f, 0.13f, 0.78f, 0.13f, 0.09f, 0.06f);
-    draw_box(-3.2f, 0.80f, -2.6f, 0.88f, 0.36f, 0.60f, 0.12f, 0.08f, 0.055f);
-    draw_box(-2.36f, -1.18f, -2.6f, 0.38f, 0.92f, 0.36f, 0.70f, 0.51f, 0.30f);
-    draw_box(-4.00f, -1.15f, -2.6f, 0.34f, 0.78f, 0.34f, 0.68f, 0.49f, 0.28f);
-
-    glPushMatrix();
-    glTranslatef(-2.20f, -0.46f, -2.48f);
-    glRotatef(swing_angle, 0.0f, 0.0f, 1.0f);
-    draw_box(0.32f, -0.08f, 0.0f, 0.90f, 0.17f, 0.18f, 0.55f, 0.38f, 0.22f);
-    draw_box(0.78f, 0.02f, 0.0f, 0.46f, 0.13f, 0.16f, 0.27f, 0.28f, 0.28f);
-    draw_box(0.02f, -0.36f, 0.0f, 0.15f, 0.40f, 0.17f, 0.31f, 0.21f, 0.12f);
-    glPopMatrix();
-    glPopMatrix();
-    glDisable(GL_DEPTH_TEST);
-}
-
-static void draw_procedural_background(unsigned int tick)
-{
-    float phase = (float)(tick % 1600u) / 800.0f;
-    float swing_angle = phase <= 1.0f ? 45.0f + phase * 85.0f
-                                      : 130.0f - (phase - 1.0f) * 85.0f;
-
-    glClearColor(0.035f, 0.045f, 0.075f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    draw_western_scene(swing_angle);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glDisable(GL_DEPTH_TEST);
-}
-
 typedef struct {
     uint16_t object;
     GLuint texture;
@@ -2783,6 +2624,15 @@ static void render_menu(int selection, int page, unsigned int tick)
     draw_menu_asset_errors();
 }
 
+static void enter_abilene(void)
+{
+    requested_game_state=0;
+    menu_audio_shutdown();
+    game_state=2;
+    ll_level_set_state(&game_level,2);
+    load_abilene_assets();
+}
+
 int main(void)
 {
     SDL_Window *window;
@@ -2880,12 +2730,15 @@ int main(void)
                     game_state = 1;
                     selection = 0;
                     page = 0;
-                    ll_gameplay_shutdown();
+                    ll_level_script_close(&abilene_script);
+                    free(abilene_cod_data);abilene_cod_data=NULL;
                     ll_level_set_state(&game_level, 1);
                     load_menu_bib();
+                    menu_audio_init();
                     restart_menu_scene();
                 } else if (game_state == 2) {
-                    ll_gameplay_key_down(event.key.keysym.sym);
+                    /* Native input variables remain explicitly unsupported;
+                     * do not drive the unrelated procedural player instead. */
                 } else if (game_state == 1 && menu_program_loaded) {
                     /* Original menu input is consumed by SOOL's native
                      * keyboard/action queries during the script update. */
@@ -2905,15 +2758,7 @@ int main(void)
                 } else if (page == 0 && (event.key.keysym.sym == SDLK_RETURN ||
                                          event.key.keysym.sym == SDLK_SPACE)) {
                     if (selection == 0) {
-                        game_state = 2;
-                        if (ll_level_set_state(&game_level, 2)) {
-                            load_abilene_assets();
-                            if (ll_level_has_cod(&game_level)) {
-                                ll_level_spawn_cod_objects(&game_level);
-                            }
-                        }
-                        ll_gameplay_set_level(&game_level);
-                        ll_gameplay_init();
+                        enter_abilene();
                         page = 0;
                         selection = 0;
                     } else if (selection == 1) {
@@ -2922,9 +2767,6 @@ int main(void)
                 }
                 break;
             case SDL_KEYUP:
-                if (game_state == 2) {
-                    ll_gameplay_key_up(event.key.keysym.sym);
-                }
                 break;
             case SDL_MOUSEBUTTONDOWN:
             {
@@ -2936,15 +2778,7 @@ int main(void)
                     selection = mouse_y >= 264 ? MENU_OPTIONS : MENU_GAME;
                     if (mouse_y < 252 || mouse_y >= 264) {
                         if (selection == 0) {
-                            game_state = 2;
-                            if (ll_level_set_state(&game_level, 2)) {
-                                load_abilene_assets();
-                                if (ll_level_has_cod(&game_level)) {
-                                    ll_level_spawn_cod_objects(&game_level);
-                                }
-                            }
-                            ll_gameplay_set_level(&game_level);
-                            ll_gameplay_init();
+                            enter_abilene();
                             page = 0;
                             selection = 0;
                         } else if (selection == 1) {
@@ -2982,16 +2816,36 @@ int main(void)
         }
 
         if (game_state == 2) {
-            ll_gameplay_update(1.0f / 60.0f);
-            if (!ll_level_render(&game_level)) {
-                /* No level assets available: fall back to procedural scene. */
-                draw_procedural_background(SDL_GetTicks());
+            uint32_t now=SDL_GetTicks();
+            uint32_t step=(uint32_t)((uint64_t)now*24u/1000u);
+            if (step!=abilene_script_tick) {
+                ll_level_script_update(&abilene_script);
+                abilene_script_tick=step;
             }
-            ll_gameplay_render();
+            /* Clear letterbox bands too; the PCX presenter fits its source
+             * aspect ratio and must not expose the previous menu frame. */
+            glClearColor(0.025f,0.025f,0.04f,1);
+            glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+            ll_level_render(&game_level);
+            glDisable(GL_TEXTURE_2D);glDisable(GL_DEPTH_TEST);
+            glMatrixMode(GL_PROJECTION);glLoadIdentity();
+            glOrtho(0,WINDOW_WIDTH,WINDOW_HEIGHT,0,-1,1);
+            glMatrixMode(GL_MODELVIEW);glLoadIdentity();
+            draw_text("ABILENE SOOL",12,12,2,1,1,1);
+            char status[96];
+            snprintf(status,sizeof(status),"%u FUNCTIONS  %u MODELS  %u BLOCKED",
+                abilene_script.program.function_count,abilene_script.object_count,
+                abilene_script.blocked_count);
+            draw_text(status,12,36,1,1,1,1);
+            draw_text(abilene_script.loaded?"NATIVE GAMEPLAY INCOMPLETE  SEE LOG":"SCRIPT LOAD FAILED  SEE LOG",
+                12,52,1,1,0.8f,0.3f);
         } else {
             update_menu_scripts(SDL_GetTicks());
             render_menu(selection, page, SDL_GetTicks());
             menu_update_animation_callbacks(SDL_GetTicks());
+            if (requested_game_state==2) {
+                enter_abilene();
+            }
         }
         SDL_GL_SwapWindow(window);
     }
@@ -3002,6 +2856,7 @@ int main(void)
         free(menu_neutral_vertices[i]);free(menu_animation_evaluated[i]);free(menu_animation_initial[i]);
     }
     ll_level_destroy(&game_level);
+    ll_level_script_close(&abilene_script);
     free(menu_bib_data);
     for (unsigned patch = 0; patch < 12; patch++)
         ll_pcx_destroy(&menu_page_patches[patch].image);

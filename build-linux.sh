@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCES=("$ROOT/src/linux/main.c" "$ROOT/src/linux/audio_mix.c" "$ROOT/src/linux/native_camera.c" "$ROOT/src/linux/asset_config.c" "$ROOT/src/linux/menu_art.c" "$ROOT/src/linux/pcx.c" "$ROOT/src/linux/kxp.c" "$ROOT/src/linux/level.c" "$ROOT/src/linux/renderer.c" "$ROOT/src/linux/object.c" "$ROOT/src/linux/gameplay.c" "$ROOT/src/linux/cod.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/biz.c" "$ROOT/src/linux/sool.c")
+SOURCES+=("$ROOT/src/linux/level_script.c")
 OUTPUT="$ROOT/build/linux/lucky-luke"
 TEST_OUTPUT="$ROOT/build/linux/renderer-test"
 PCX_TEST_OUTPUT="$ROOT/build/linux/pcx-test"
@@ -73,3 +74,19 @@ echo "Built BIZ sound test: $BIZ_SOUND_TEST_OUTPUT"
 echo "Built audio mixer test: $AUDIO_MIX_TEST_OUTPUT"
 echo "Built native camera test: $NATIVE_CAMERA_TEST_OUTPUT"
 echo "Built BIB pose test: $BIB_POSE_TEST_OUTPUT"
+
+"$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror -I"$ROOT/src/linux" \
+  "$ROOT/src/linux/abilene_trace.c" "$ROOT/src/linux/level_script.c" \
+  "$ROOT/src/linux/sool.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/native_camera.c" \
+  -o "$ROOT/build/linux/abilene-trace" -lm
+echo "Built original-script tracer: $ROOT/build/linux/abilene-trace"
+"$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror -I"$ROOT/src/linux" \
+  "$ROOT/src/linux/level_script_test.c" "$ROOT/src/linux/level_script.c" \
+  "$ROOT/src/linux/sool.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/native_camera.c" \
+  -o "$ROOT/build/linux/level-script-test" -lm
+"$ROOT/build/linux/level-script-test"
+"$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror \
+  $(pkg-config --cflags sdl2 gl) -I"$ROOT/src/linux" \
+  "$ROOT/src/linux/level_background_test.c" "${SOURCES[@]:1}" \
+  -o "$ROOT/build/linux/level-background-test" $(pkg-config --libs sdl2 gl) -lm
+echo "Built level background test: $ROOT/build/linux/level-background-test"
