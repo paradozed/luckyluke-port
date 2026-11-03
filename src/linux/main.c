@@ -2063,7 +2063,7 @@ typedef struct {
     int attempted;
 } LL_MenuPagePatch;
 static LL_MenuPagePatch menu_page_patches[12] = {
-    {.page=6,.x=80,.y=0}, {.page=14,.x=0,.y=0},
+    {.page=6,.x=79,.y=0}, {.page=14,.x=0,.y=0},
     {.page=14,.x=0,.y=100}, {.page=14,.x=0,.y=202}
 };
 
