@@ -19,6 +19,17 @@ void ll_native_vertex_transform(const int16_t *matrix, const int16_t point[3],
 void ll_native_camera_rotation(int16_t pitch, int16_t yaw, int16_t rows[3][3]);
 void ll_native_camera_view(int16_t pitch, int16_t yaw, const int32_t reference[3],
                            uint32_t depth, int16_t rows[3][3], int32_t translation[3]);
+/* FUN_00482640/00480e20: compose the view and scene-root transform before
+ * transforming vertices. Translation and matrix products round separately. */
+void ll_native_camera_model_view(const int16_t *view, const int32_t view_translation[3],
+                                 const int16_t *model, const int32_t position[3],
+                                 int16_t *rows, int32_t translation[3]);
+void ll_native_camera_vertex(const int16_t *rows, const int32_t translation[3],
+                             const int16_t point[3], int32_t camera[3]);
+/* Positive-Z, Y-down perspective for the reference 640x480 scene. Native
+ * FUN_004830a0 focal scales; homogeneous coordinates retain near-plane clipping.
+ * This is distinct from the fixed (256,128) sound/background queries below. */
+void ll_native_camera_projection(uint16_t projection, double matrix[16]);
 /* FUN_00420320/0041f260: native approximate distance, divided by100. */
 uint16_t ll_native_distance100(const int32_t a[3], const int32_t b[3]);
 uint16_t ll_native_screen_pan(const int32_t a[2], const int32_t b[2]);

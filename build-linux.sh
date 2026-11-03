@@ -37,7 +37,7 @@ mkdir -p "$(dirname "$OUTPUT")"
 
 "$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror \
   $(pkg-config --cflags sdl2 gl) -I"$ROOT/src/linux" \
-  "$ROOT/src/linux/renderer_test.c" "$ROOT/src/linux/renderer.c" \
+  "$ROOT/src/linux/renderer_test.c" "$ROOT/src/linux/renderer.c" "$ROOT/src/linux/native_camera.c" \
   -o "$TEST_OUTPUT" $(pkg-config --libs sdl2 gl) -lm
 
 "$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror -I"$ROOT/src/linux" \

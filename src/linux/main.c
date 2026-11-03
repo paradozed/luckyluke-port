@@ -2538,72 +2538,33 @@ static void menu_render_sprite_groups(void)
     }
 }
 
-/* Project a model-space vertex through the model transform and camera
- * to 2D screen coordinates using an orthographic (parallel) projection.
- * No Z division means no perspective distortion glitches. Returns 0 if
- * the camera is not configured. */
-static int project_model_vertex(const int16_t vertex_pos[3],
-                                const int32_t model_pos[3],
-                                const int16_t *model_rot,
-                                int32_t screen_out[2])
-{
-    if (!menu_camera.has_reference)
-        return 0;
-
-    /* Apply model transform: world = model_pos + model_rot * vertex */
-    int32_t world[3];
-    if (model_rot != NULL) {
-        for (unsigned r = 0; r < 3; r++) {
-            int64_t sum = 0;
-            for (unsigned c = 0; c < 3; c++)
-                sum += (int64_t)model_rot[r * 3u + c] * vertex_pos[c];
-            world[r] = model_pos[r] + (int32_t)(sum / 4096);
-        }
-    } else {
-        world[0] = model_pos[0] + vertex_pos[0];
-        world[1] = model_pos[1] + vertex_pos[1];
-        world[2] = model_pos[2] + vertex_pos[2];
-    }
-
-    /* Camera space: subtract reference, rotate by camera pitch/yaw */
-    int16_t cam_rows[3][3];
-    ll_native_camera_rotation(menu_camera.pitch, menu_camera.yaw, cam_rows);
-    int32_t cam[3];
-    for (unsigned r = 0; r < 3; r++) {
-        int64_t sum = 0;
-        for (unsigned c = 0; c < 3; c++)
-            sum += (int64_t)cam_rows[r][c] * (world[c] - menu_camera.reference[c]);
-        cam[r] = (int32_t)(sum / 4096);
-    }
-
-    /* Orthographic projection: X and Y only, no Z division.
-     * Scale: projection units map to DirectDraw 512x256 surface. */
-    int32_t dd_x = cam[0] / 40 + 256;  /* center on 512-wide surface */
-    int32_t dd_y = cam[1] / 40 + 128;  /* center on 256-high surface */
-
-    /* Scale from 512x256 to window space */
-    screen_out[0] = dd_x * WINDOW_WIDTH / 512;
-    screen_out[1] = dd_y * WINDOW_HEIGHT / 256;
-    return 1;
-}
 static void render_menu(int selection, int page, unsigned int tick)
 {
     (void)selection;
     (void)page;
-    /* Render the BIB/BIZ scene as background, then draw the menu overlay
-     * (title, buttons, selection) on top. */
+    /* Background children, original scene geometry, then script UI. */
     glClearColor(0.012f, 0.018f, 0.045f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     menu_render_background_sprites();
 
-    /* ---- Render 3D BIB scene objects with camera-to-2D projection ---- */
-    glDisable(GL_DEPTH_TEST);
+    /* FUN_004830a0 projects the scene about (320,240), with focal scales
+     * 640/448 and 480/240. Keep positive camera Z until GL clips triangles;
+     * projecting/clamping each corner first creates huge near-plane faces. */
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
     glDisable(GL_CULL_FACE);
+    glDisable(GL_BLEND);
     glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
+    GLdouble projection[16];
+    ll_native_camera_projection(menu_camera.projection, projection);
+    glLoadMatrixd(projection);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+    int16_t view[3][3];
+    int32_t view_translation[3];
+    ll_native_camera_view(menu_camera.pitch, menu_camera.yaw,
+                          menu_camera.reference, menu_camera_depth,
+                          view, view_translation);
 
     /* ---- Advance BIZ sprite animations (time-based frame progression) ---- */
     for (size_t object_index = 0; object_index < menu_scene_object_count; object_index++) {
@@ -2723,25 +2684,22 @@ static void render_menu(int selection, int page, unsigned int tick)
                 }
             }
         }
-        /* Project model through camera to 2D screen space and draw.
-         * Objects with poses use pose position/angles; others use
-         * model anchor + orientation matrix. */
-        int32_t model_pos[3];
-        int32_t screen_pos[2];
-        const int16_t *model_rot = NULL;
-        if (menu_camera.has_reference && menu_object_has_pose[object_index]) {
+        if (!menu_camera.has_reference || !menu_camera.projection) continue;
+        /* FUN_00482640/00480e20 compose view and root matrices before
+         * FUN_00482e60 transforms each signed16 vertex. SOOL pose angles
+         * are part of that root transform, including for animated models. */
+        const int32_t *model_pos = model->anchor;
+        const int16_t *model_rot = model->orientation;
+        int16_t pose_rotation[3][3], model_view[3][3];
+        int32_t model_translation[3];
+        if (menu_object_has_pose[object_index]) {
             const LL_BibScenePose *pose = &menu_object_poses[object_index];
-            model_pos[0] = pose->position[0];
-            model_pos[1] = pose->position[1];
-            model_pos[2] = pose->position[2];
-            /* Pose angles unused with orthographic projection */
-            (void)pose;
-        } else {
-            model_pos[0] = model->anchor[0];
-            model_pos[1] = model->anchor[1];
-            model_pos[2] = model->anchor[2];
-            model_rot = model->orientation;
+            model_pos = pose->position;
+            ll_native_model_rotation(pose->angles, pose_rotation);
+            model_rot = &pose_rotation[0][0];
         }
+        ll_native_camera_model_view(&view[0][0], view_translation,
+            model_rot, model_pos, &model_view[0][0], model_translation);
 
         for (uint32_t group_index = 0; group_index < model->group_count; group_index++) {
             const LL_BibGeometryGroup *group = &model->groups[group_index];
@@ -2758,12 +2716,11 @@ static void render_menu(int selection, int page, unsigned int tick)
                     glEnable(GL_ALPHA_TEST);
                     glAlphaFunc(GL_GREATER, 0.0f);
                 } else glDisable(GL_TEXTURE_2D);
-                /* Collect projected vertices first; skip element if any
-                 * vertex projects off-screen (behind/too close to camera)
-                 * or if the face spans too much Z depth (causes extreme
-                 * perspective distortion within a single polygon). */
+                /* Validate the complete face before glBegin. Keep camera
+                 * coordinates so GL clips crossing faces instead of dropping
+                 * them or using already-divided coordinates behind the eye. */
                 static const uint8_t quad_corners[6] = {0, 1, 3, 3, 1, 2};
-                int32_t proj_x[6], proj_y[6];
+                int32_t camera_vertices[6][3];
                 uint32_t proj_color[6];
                 int all_valid = 1;
                 for (uint32_t submitted = 0; submitted < (quad ? 6u : 3u); submitted++) {
@@ -2774,11 +2731,8 @@ static void render_menu(int selection, int page, unsigned int tick)
                     if (vertex_index >= model->vertex_count) { all_valid = 0; break; }
                     vertex = menu_neutral_vertices[object_index] != NULL
                         ? &menu_neutral_vertices[object_index][vertex_index] : &model->vertices[vertex_index];
-                    if (!project_model_vertex(vertex->position, model_pos,
-                                              model_rot,
-                                              screen_pos)) { all_valid = 0; break; }
-                    proj_x[submitted] = screen_pos[0];
-                    proj_y[submitted] = screen_pos[1];
+                    ll_native_camera_vertex(&model_view[0][0], model_translation,
+                        vertex->position, camera_vertices[submitted]);
                     proj_color[submitted] = (group->type >= 4u)
                         ? element->corner_colors[attribute_corner]
                         : element->attributes;
@@ -2806,7 +2760,7 @@ static void render_menu(int selection, int page, unsigned int tick)
                     if (texture != NULL && texture->texture != 0)
                         glTexCoord2f((float)(element->corner_data[attribute_corner][0] - texture->sprite.texture_x) / texture->width,
                                      (float)(element->corner_data[attribute_corner][1] - texture->sprite.texture_y) / texture->height);
-                    glVertex2i(proj_x[submitted], proj_y[submitted]);
+                    glVertex3iv(camera_vertices[submitted]);
                 }
                 glEnd();
                 glDisable(GL_ALPHA_TEST);
@@ -2824,71 +2778,8 @@ static void render_menu(int selection, int page, unsigned int tick)
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    /* ---- Dessiner le titre et les boutons du menu (UI texte) ---- */
-    /* Titre "LUCKY LUKE" en haut centré (police 5x7, scale=3) */
-    {
-        int title_w = 11 * 6 * 3;   /* 11 caractères, 6 px d'avance chacun */
-        int title_x = (WINDOW_WIDTH - title_w) / 2;
-        draw_text("LUCKY LUKE", title_x, 45, 3, 1.0f, 0.85f, 0.20f);
-    }
-
-    /* Boutons GAME et OPTIONS avec fond et surbrillance selon la sélection */
-    {
-        const char *btn_labels[2] = {"GAME", "OPTIONS"};
-        int btn_x = 200;
-        int btn_y[2] = {185, 235};
-        for (int b = 0; b < 2; b++) {
-            int selected = (b == selection);
-            /* Fond du bouton */
-            int label_len = 0;
-            for (const char *p = btn_labels[b]; *p; p++) label_len++;
-            int btn_w = label_len * 6 * 2 + 24;
-            int btn_h = 7 * 2 + 12;
-            glColor3f(selected ? 0.25f : 0.06f,
-                      selected ? 0.25f : 0.06f,
-                      selected ? 0.45f : 0.10f);
-            glBegin(GL_QUADS);
-            glVertex2i(btn_x - 6, btn_y[b] - 6);
-            glVertex2i(btn_x - 6 + btn_w, btn_y[b] - 6);
-            glVertex2i(btn_x - 6 + btn_w, btn_y[b] - 6 + btn_h);
-            glVertex2i(btn_x - 6, btn_y[b] - 6 + btn_h);
-            glEnd();
-            /* Texte du bouton */
-            glColor3f(selected ? 1.0f : 0.6f,
-                      selected ? 0.9f : 0.45f,
-                      selected ? 0.20f : 0.30f);
-            draw_text(btn_labels[b], btn_x, btn_y[b], 2,
-                      selected ? 1.0f : 0.6f,
-                      selected ? 0.9f : 0.45f,
-                      selected ? 0.20f : 0.30f);
-        }
-    }
-
-    /* Flèche de sélection à gauche du bouton actif */
-    {
-        int arrow_y = (selection == MENU_GAME) ? 185 : 235;
-        glColor3f(1.0f, 0.90f, 0.20f);
-        glBegin(GL_TRIANGLES);
-        glVertex2i(152, arrow_y + 4);
-        glVertex2i(168, arrow_y + 4);
-        glVertex2i(160, arrow_y + 16);
-        glEnd();
-    }
-
-    /* Détecte si SOOL a positionné des éléments UI originaux
-     * (modèles, sprites, flèches, curseurs) via les objets de scène BIB/BIZ.
-     * Si SOOL a créé au moins un objet de scène (commandes 0x65/0x71),
-     * les actifs originaux pilotent le menu et le message d'erreur n'apparaît pas. */
-    int has_sool_ui = menu_scene_object_count > 0;
-
-    if (!has_sool_ui) {
-        /* No original BIB/BIZ assets have been positioned by the SOOL
-         * script. Refuse to substitute invented UI: report an explicit
-         * error on stderr and leave the frame empty. */
-        fprintf(stderr,
-                "ERROR: no original menu assets loaded (option.cod / option.bib / option.biz missing or not parsed).\n"
-                "       Set cd_mount in config.ini to your Lucky Luke CD mount point.\n");
-    }
+    /* The original signpost, labels and selector are SOOL scene objects.
+     * Only diagnostic text is drawn by the host; no duplicate menu overlay. */
     draw_menu_asset_errors();
 }
 
@@ -2914,6 +2805,7 @@ int main(void)
 
     if (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2) != 0 ||
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1) != 0 ||
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24) != 0 ||
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) != 0) {
         fprintf(stderr, "ERROR: cannot configure the OpenGL context: %s\n", SDL_GetError());
         SDL_Quit();

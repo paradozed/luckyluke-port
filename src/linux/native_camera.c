@@ -175,6 +175,44 @@ void ll_native_camera_view(int16_t pitch, int16_t yaw, const int32_t reference[3
         translation[axis]=signed32((axis==2 ? depth : 0u)-(uint32_t)transform(rows[axis],reference));
 }
 
+void ll_native_camera_model_view(const int16_t *view, const int32_t view_translation[3],
+                                 const int16_t *model, const int32_t position[3],
+                                 int16_t *rows, int32_t translation[3])
+{
+    int32_t result[3];
+    for (unsigned axis=0;axis<3;axis++)
+        result[axis]=signed32((uint32_t)transform(view+axis*3u,position)+
+                             (uint32_t)view_translation[axis]);
+    ll_native_rotation_multiply(view,model,rows);
+    memcpy(translation,result,sizeof(result));
+}
+
+void ll_native_camera_vertex(const int16_t *rows, const int32_t translation[3],
+                             const int16_t point[3], int32_t camera[3])
+{
+    int32_t input[3]={point[0],point[1],point[2]}, result[3];
+    for (unsigned axis=0;axis<3;axis++)
+        result[axis]=signed32((uint32_t)transform(rows+axis*3u,input)+
+                             (uint32_t)translation[axis]);
+    memcpy(camera,result,sizeof(result));
+}
+
+void ll_native_camera_projection(uint16_t projection, double matrix[16])
+{
+    /* FUN_004830a0 stores float ratios, multiplies, then truncates to int.
+     * The original scene uses the output center, not the sound query center.
+     * Near/far clipping are OpenGL presentation policy, not native constants. */
+    int32_t focal_x=(int32_t)(projection*(640.0f/448.0f));
+    int32_t focal_y=(int32_t)(projection*(480.0f/240.0f));
+    const double near=1.0, far=200000.0;
+    memset(matrix,0,16*sizeof(*matrix));
+    matrix[0]=2.0*focal_x/640.0;
+    matrix[5]=-2.0*focal_y/480.0;
+    matrix[10]=(far+near)/(far-near);
+    matrix[11]=1.0;
+    matrix[14]=-2.0*far*near/(far-near);
+}
+
 void ll_native_camera_screen(const int32_t point[3], const int32_t reference[3],
                                   int16_t pitch, int16_t yaw, uint32_t depth,
                                   uint16_t projection, int32_t screen[2])

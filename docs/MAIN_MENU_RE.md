@@ -1,5 +1,70 @@
 # Main menu reverse-engineering notes
 
+## Current implementation audit (2026-11-04)
+
+The sections below are an investigation history, including hypotheses later
+superseded by other sections. They must not all be treated as current runtime
+status. This audit compared the current Linux source, the existing Ghidra C,
+and focused `objdump -d -Mintel` reads of unchanged `orig/Game.run`
+(SHA256 `d95ab4f23bf0d51963f53dcec8e69813b51e22847e137b7cfc9e168bf2e1b5f8`).
+REA MCP tools were unavailable in this session; the evidence here comes from
+those local files and tools, not a new REA analysis or original-game runtime.
+
+Confirmed regression and correction:
+
+- `FUN_004830a0` (`0x4830b8..0x483132`) computes scene focal lengths using
+  width/448 and height/240, truncating to integers. At the port's reference
+  640x480 surface, projection 768 gives 1097/1536. `FUN_00404230` and
+  `FUN_0047c4e0` set the center to half the output dimensions. The native
+  sound query's fixed center256/128 and depth clamp are a different API;
+  they must not be reused to draw model vertices.
+- HEAD had replaced the scene with `cameraXY / 40`, discarded depth,
+  ignored SOOL root angles and drawn a second title/button/arrow overlay.
+  The earlier attempted `glFrustum(-focal,focal,...)` also used focal
+  lengths as frustum extents, inverting their intended role. None of these
+  substitutions follows the inspected native scene projection.
+- `FUN_00482640` and its wide-position variant `FUN_00480e20` compose view
+  and model basis first, then transform the root translation separately.
+  `0x482e89..0x482f13` multiplies signed16 model vertices by that composed
+  basis, performs SAR12, then adds signed32 camera-space translation.
+  The port now follows those stages, retaining SOOL root rotations and the
+  existing native camera compression/depth offset. It does not narrow
+  camera-space coordinates back to signed16 model storage.
+- A positive-Z/Y-down homogeneous projection now maps those camera-space
+  vertices to the reference display. OpenGL clips crossing triangles before
+  dividing by Z, and a requested 24-bit depth buffer orders scene surfaces.
+  The arbitrary whole-face depth thresholds and procedural menu overlay
+  are absent. Original BIB/BIZ/SOOL objects supply the visible menu.
+
+Validation includes fixed camera/root-transform cases (rotation, signed
+rounding, large translations), focal/center/depth tests and an OpenGL
+framebuffer regression for triangles behind the eye, crossing the near plane,
+and overlapping surfaces submitted in reverse depth order. The latter runs
+through `xvfb-run -a env SDL_VIDEODRIVER=x11 build/linux/renderer-test`.
+The normal strict build runs the arithmetic tests. ASan/UBSan camera tests
+also pass with leak detection disabled because LSan cannot run under this
+environment's ptrace supervision; leak checking is not claimed.
+
+Isolated X11/Xvfb runtime checks used the installed original resources with
+temporary configurations, leaving the repository config and original files
+unchanged. French 640x480 and English 800x600 captures show the original
+signpost and animated Lucky in perspective, without the procedural overlay.
+Down then Enter opens the four options boards. Options initially selects
+Retour (selector 5): two Up releases select S.F.X (selector 3). Enter then
+executes the original multi-stage camera journey; a capture after 28 seconds
+shows the saloon, dancers and original audio settings panel. A four-second
+capture was still in transit and did not prove panel completion. No WARNING
+or ERROR was logged in these runs. Audio was disabled for this visual check.
+The controller panel and complete return journey were not revalidated here.
+
+Limitations: OpenGL clipping, depth ordering and perspective texture sampling
+are presentation choices, not a recovered byte-identical Win3DX rasterizer.
+The port uses near 1/far 200000 and retains fractional screen positions instead
+of the original final signed16 screen-coordinate truncation. Existing sprite,
+skeletal animation and shared texture-page limitations below remain separate.
+No new original Windows menu capture was obtained, so this audit establishes
+algorithm/source agreement and native-port runtime behavior, not pixel parity.
+
 ## Camera Z bounds ruled out as the scale discrepancy
 
 `FUN_00452fa0` initializes the camera's Z limits to `-800000` and
