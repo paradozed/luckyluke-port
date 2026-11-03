@@ -2539,14 +2539,6 @@ static void menu_render_sprite_groups(void)
 }
 
 /* Project a model-space vertex through the model transform and camera
- * to 2D screen coordinates in window space. Returns 0 if the camera
- * is not configured. model_rot is a 9-int16 fixed-point matrix (/4096)
- * or NULL; model_angles are Euler angles or NULL. */
-/* Project a model-space vertex through the model transform and camera
- * to 2D screen coordinates using an orthographic (parallel) projection.
- * No Z division means no perspective distortion glitches. Returns 0 if
- * the camera is not configured. */
-/* Project a model-space vertex through the model transform and camera
  * to 2D screen coordinates using an orthographic (parallel) projection.
  * No Z division means no perspective distortion glitches. Returns 0 if
  * the camera is not configured. */
@@ -2832,10 +2824,61 @@ static void render_menu(int selection, int page, unsigned int tick)
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    /* Detect whether SOOL has positioned original menu UI elements
-     * (models, sprites, arrows, cursors) via BIB/BIZ scene objects.
-     * If SOOL created any scene object (0x65/0x71 commands), the original
-     * assets drive the menu and the error message must not appear. */
+    /* ---- Dessiner le titre et les boutons du menu (UI texte) ---- */
+    /* Titre "LUCKY LUKE" en haut centré (police 5x7, scale=3) */
+    {
+        int title_w = 11 * 6 * 3;   /* 11 caractères, 6 px d'avance chacun */
+        int title_x = (WINDOW_WIDTH - title_w) / 2;
+        draw_text("LUCKY LUKE", title_x, 45, 3, 1.0f, 0.85f, 0.20f);
+    }
+
+    /* Boutons GAME et OPTIONS avec fond et surbrillance selon la sélection */
+    {
+        const char *btn_labels[2] = {"GAME", "OPTIONS"};
+        int btn_x = 200;
+        int btn_y[2] = {185, 235};
+        for (int b = 0; b < 2; b++) {
+            int selected = (b == selection);
+            /* Fond du bouton */
+            int label_len = 0;
+            for (const char *p = btn_labels[b]; *p; p++) label_len++;
+            int btn_w = label_len * 6 * 2 + 24;
+            int btn_h = 7 * 2 + 12;
+            glColor3f(selected ? 0.25f : 0.06f,
+                      selected ? 0.25f : 0.06f,
+                      selected ? 0.45f : 0.10f);
+            glBegin(GL_QUADS);
+            glVertex2i(btn_x - 6, btn_y[b] - 6);
+            glVertex2i(btn_x - 6 + btn_w, btn_y[b] - 6);
+            glVertex2i(btn_x - 6 + btn_w, btn_y[b] - 6 + btn_h);
+            glVertex2i(btn_x - 6, btn_y[b] - 6 + btn_h);
+            glEnd();
+            /* Texte du bouton */
+            glColor3f(selected ? 1.0f : 0.6f,
+                      selected ? 0.9f : 0.45f,
+                      selected ? 0.20f : 0.30f);
+            draw_text(btn_labels[b], btn_x, btn_y[b], 2,
+                      selected ? 1.0f : 0.6f,
+                      selected ? 0.9f : 0.45f,
+                      selected ? 0.20f : 0.30f);
+        }
+    }
+
+    /* Flèche de sélection à gauche du bouton actif */
+    {
+        int arrow_y = (selection == MENU_GAME) ? 185 : 235;
+        glColor3f(1.0f, 0.90f, 0.20f);
+        glBegin(GL_TRIANGLES);
+        glVertex2i(152, arrow_y + 4);
+        glVertex2i(168, arrow_y + 4);
+        glVertex2i(160, arrow_y + 16);
+        glEnd();
+    }
+
+    /* Détecte si SOOL a positionné des éléments UI originaux
+     * (modèles, sprites, flèches, curseurs) via les objets de scène BIB/BIZ.
+     * Si SOOL a créé au moins un objet de scène (commandes 0x65/0x71),
+     * les actifs originaux pilotent le menu et le message d'erreur n'apparaît pas. */
     int has_sool_ui = menu_scene_object_count > 0;
 
     if (!has_sool_ui) {
