@@ -1244,6 +1244,66 @@ static int menu_sool_dispatch(uint8_t opcode, uint16_t *stack, size_t *stack_siz
     return 1; /* Non-rendering engine commands have no Linux host effect yet. */
 }
 
+static int load_and_execute_menu_script(void);
+
+/* Restart the menu scene from scratch: reset all BIB/BIZ object state,
+ * animation state, and SOOL script contexts, then re-execute option.cod.
+ * Called when returning to the menu from gameplay so the menu scene is
+ * re-initialized with fresh state rather than continuing from a paused
+ * script execution. */
+static void restart_menu_scene(void)
+{
+    /* Free per-object animation resources */
+    for (size_t i = 0; i < menu_scene_object_count; i++) {
+        free(menu_neutral_vertices[i]);
+        menu_neutral_vertices[i] = NULL;
+        free(menu_animation_evaluated[i]);
+        menu_animation_evaluated[i] = NULL;
+        free(menu_animation_initial[i]);
+        menu_animation_initial[i] = NULL;
+    }
+    /* Reset all menu scene state arrays */
+    memset(menu_scene_objects, 0, sizeof(menu_scene_objects));
+    menu_scene_object_count = 0;
+    memset(menu_neutral_attempted, 0, sizeof(menu_neutral_attempted));
+    memset(menu_object_has_pose, 0, sizeof(menu_object_has_pose));
+    memset(menu_object_poses, 0, sizeof(menu_object_poses));
+    memset(menu_sprite_screen, 0, sizeof(menu_sprite_screen));
+    memset(menu_sprite_offset, 0, sizeof(menu_sprite_offset));
+    memset(menu_sprite_has_screen, 0, sizeof(menu_sprite_has_screen));
+    memset(menu_animation_selector, 0, sizeof(menu_animation_selector));
+    memset(menu_animation_once, 0, sizeof(menu_animation_once));
+    memset(menu_animation_first, 0, sizeof(menu_animation_first));
+    memset(menu_animation_last, 0, sizeof(menu_animation_last));
+    memset(menu_animation_frame, 0, sizeof(menu_animation_frame));
+    memset(menu_animation_fraction, 0, sizeof(menu_animation_fraction));
+    memset(menu_animation_object_start, 0, sizeof(menu_animation_object_start));
+    memset(menu_animation_callback_owner, 0, sizeof(menu_animation_callback_owner));
+    memset(menu_sprite_animation_selector, 0, sizeof(menu_sprite_animation_selector));
+    memset(menu_sprite_animation_once, 0, sizeof(menu_sprite_animation_once));
+    memset(menu_sprite_animation_first, 0, sizeof(menu_sprite_animation_first));
+    memset(menu_sprite_animation_last, 0, sizeof(menu_sprite_animation_last));
+    memset(menu_sprite_animation_frame, 0, sizeof(menu_sprite_animation_frame));
+    memset(menu_sprite_animation_start, 0, sizeof(menu_sprite_animation_start));
+    memset(menu_animation_duration, 0, sizeof(menu_animation_duration));
+    memset(menu_animation_blend_ticks, 0, sizeof(menu_animation_blend_ticks));
+    memset(menu_animation_pose_count, 0, sizeof(menu_animation_pose_count));
+    memset(menu_animation_pose_valid, 0, sizeof(menu_animation_pose_valid));
+    memset(menu_pose_groups, 0, sizeof(menu_pose_groups));
+
+    /* Reset SOOL program state */
+    ll_sool_program_close(&menu_program);
+    free(menu_script_data);
+    menu_script_data = NULL;
+    free(menu_script_contexts);
+    menu_script_contexts = NULL;
+    menu_program_loaded = 0;
+    menu_animation_started = 0;
+
+    /* Re-execute the menu script */
+    load_and_execute_menu_script();
+}
+
 static int load_and_execute_menu_script(void)
 {
     size_t size = 0;
@@ -2873,6 +2933,7 @@ int main(void)
                     ll_gameplay_shutdown();
                     ll_level_set_state(&game_level, 1);
                     load_menu_bib();
+                    restart_menu_scene();
                 } else if (game_state == 2) {
                     ll_gameplay_key_down(event.key.keysym.sym);
                 } else if (game_state == 1 && menu_program_loaded) {
