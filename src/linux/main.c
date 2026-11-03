@@ -2779,7 +2779,72 @@ static void render_menu(int selection, int page, unsigned int tick)
     }
 
     if (!has_sool_ui) {
-        /* Draw menu title and selection overlay (procedural fallback) */
+        /* ---- Procedural fallback: approximate the original menu composition
+         * (moon, Lucky Luke silhouette, title, buttons) until the original
+         * BIB/BIZ assets are loaded and driven by the SOOL script. ---- */
+
+        /* Draw moon (top right) */
+        glColor3f(0.95f, 0.95f, 0.90f);
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(WINDOW_WIDTH - 90.0f, 90.0f);
+        for (int a = 0; a <= 32; a++) {
+            float angle = (float)a * 6.283185f / 32.0f;
+            glVertex2f(WINDOW_WIDTH - 90.0f + 44.0f * cosf(angle),
+                       90.0f + 44.0f * sinf(angle));
+        }
+        glEnd();
+
+        /* Draw Lucky Luke silhouette (left side) */
+        glColor3f(0.10f, 0.08f, 0.06f);
+        /* Hat brim */
+        glBegin(GL_QUADS);
+        glVertex2i(60, 260); glVertex2i(130, 260);
+        glVertex2i(130, 272); glVertex2i(60, 272);
+        glEnd();
+        /* Hat crown */
+        glBegin(GL_TRIANGLES);
+        glVertex2i(75, 272); glVertex2i(115, 272);
+        glVertex2i(95, 310);
+        glEnd();
+        /* Head */
+        glBegin(GL_QUADS);
+        glVertex2i(82, 260); glVertex2i(108, 260);
+        glVertex2i(108, 286); glVertex2i(82, 286);
+        glEnd();
+        /* Body */
+        glBegin(GL_QUADS);
+        glVertex2i(78, 286); glVertex2i(112, 286);
+        glVertex2i(112, 340); glVertex2i(78, 340);
+        glEnd();
+        /* Gun arm (raised right arm) */
+        glBegin(GL_QUADS);
+        glVertex2i(108, 300); glVertex2i(132, 300);
+        glVertex2i(132, 314); glVertex2i(108, 314);
+        glEnd();
+        /* Gun */
+        glColor3f(0.05f, 0.04f, 0.03f);
+        glBegin(GL_QUADS);
+        glVertex2i(132, 304); glVertex2i(152, 304);
+        glVertex2i(152, 312); glVertex2i(132, 312);
+        glEnd();
+        glColor3f(0.10f, 0.08f, 0.06f);
+        /* Legs */
+        glBegin(GL_QUADS);
+        glVertex2i(82, 340); glVertex2i(98, 340);
+        glVertex2i(98, 390); glVertex2i(82, 390);
+        glEnd();
+        glBegin(GL_QUADS);
+        glVertex2i(92, 340); glVertex2i(108, 340);
+        glVertex2i(108, 390); glVertex2i(92, 390);
+        glEnd();
+        /* Belt */
+        glColor3f(0.40f, 0.25f, 0.10f);
+        glBegin(GL_QUADS);
+        glVertex2i(78, 340); glVertex2i(112, 340);
+        glVertex2i(112, 348); glVertex2i(78, 348);
+        glEnd();
+
+        /* Draw menu title */
         glColor3f(1.0f, 0.8f, 0.2f);
         draw_text("LUCKY LUKE", WINDOW_WIDTH / 2 - 120, 120, 3, 1.0f, 0.8f, 0.2f);
 
@@ -2830,6 +2895,11 @@ static void render_menu(int selection, int page, unsigned int tick)
         }
 
         draw_text("ESC TO QUIT", WINDOW_WIDTH / 2 - 70, 420, 1, 0.6f, 0.6f, 0.6f);
+
+        /* Inform user that original assets are not loaded */
+        glColor3f(0.8f, 0.4f, 0.3f);
+        draw_text("RESSOURCES ORIGINALES INDISPONIBLES - MODE FALLBACK",
+                  WINDOW_WIDTH / 2 - 190, 450, 1, 0.8f, 0.5f, 0.5f);
     }
     draw_menu_asset_errors();
 }
