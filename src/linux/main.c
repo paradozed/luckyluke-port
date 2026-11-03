@@ -2551,6 +2551,7 @@ static void menu_render_sprite_groups(void)
 
 static void render_menu(int selection, int page, unsigned int tick)
 {
+    (void)selection;
     (void)page;
     /* Render the BIB/BIZ scene as background, then draw the menu overlay
      * (title, buttons, selection) on top. */
@@ -2760,8 +2761,7 @@ static void render_menu(int selection, int page, unsigned int tick)
 
     /* Detect whether SOOL has positioned original menu UI elements
      * (title, buttons, arrows, cursors) via BIZ screen sprites or
-     * sprite groups. If so, the original assets drive the menu and
-     * procedural drawing is only a fallback. */
+     * sprite groups. If so, the original assets drive the menu. */
     int has_sool_ui = 0;
     for (size_t i = 0; i < menu_scene_object_count && !has_sool_ui; i++) {
         if (menu_scene_objects[i].is_biz_sprite && menu_sprite_has_screen[i])
@@ -2779,127 +2779,12 @@ static void render_menu(int selection, int page, unsigned int tick)
     }
 
     if (!has_sool_ui) {
-        /* ---- Procedural fallback: approximate the original menu composition
-         * (moon, Lucky Luke silhouette, title, buttons) until the original
-         * BIB/BIZ assets are loaded and driven by the SOOL script. ---- */
-
-        /* Draw moon (top right) */
-        glColor3f(0.95f, 0.95f, 0.90f);
-        glBegin(GL_TRIANGLE_FAN);
-        glVertex2f(WINDOW_WIDTH - 90.0f, 90.0f);
-        for (int a = 0; a <= 32; a++) {
-            float angle = (float)a * 6.283185f / 32.0f;
-            glVertex2f(WINDOW_WIDTH - 90.0f + 44.0f * cosf(angle),
-                       90.0f + 44.0f * sinf(angle));
-        }
-        glEnd();
-
-        /* Draw Lucky Luke silhouette (left side) */
-        glColor3f(0.10f, 0.08f, 0.06f);
-        /* Hat brim */
-        glBegin(GL_QUADS);
-        glVertex2i(60, 260); glVertex2i(130, 260);
-        glVertex2i(130, 272); glVertex2i(60, 272);
-        glEnd();
-        /* Hat crown */
-        glBegin(GL_TRIANGLES);
-        glVertex2i(75, 272); glVertex2i(115, 272);
-        glVertex2i(95, 310);
-        glEnd();
-        /* Head */
-        glBegin(GL_QUADS);
-        glVertex2i(82, 260); glVertex2i(108, 260);
-        glVertex2i(108, 286); glVertex2i(82, 286);
-        glEnd();
-        /* Body */
-        glBegin(GL_QUADS);
-        glVertex2i(78, 286); glVertex2i(112, 286);
-        glVertex2i(112, 340); glVertex2i(78, 340);
-        glEnd();
-        /* Gun arm (raised right arm) */
-        glBegin(GL_QUADS);
-        glVertex2i(108, 300); glVertex2i(132, 300);
-        glVertex2i(132, 314); glVertex2i(108, 314);
-        glEnd();
-        /* Gun */
-        glColor3f(0.05f, 0.04f, 0.03f);
-        glBegin(GL_QUADS);
-        glVertex2i(132, 304); glVertex2i(152, 304);
-        glVertex2i(152, 312); glVertex2i(132, 312);
-        glEnd();
-        glColor3f(0.10f, 0.08f, 0.06f);
-        /* Legs */
-        glBegin(GL_QUADS);
-        glVertex2i(82, 340); glVertex2i(98, 340);
-        glVertex2i(98, 390); glVertex2i(82, 390);
-        glEnd();
-        glBegin(GL_QUADS);
-        glVertex2i(92, 340); glVertex2i(108, 340);
-        glVertex2i(108, 390); glVertex2i(92, 390);
-        glEnd();
-        /* Belt */
-        glColor3f(0.40f, 0.25f, 0.10f);
-        glBegin(GL_QUADS);
-        glVertex2i(78, 340); glVertex2i(112, 340);
-        glVertex2i(112, 348); glVertex2i(78, 348);
-        glEnd();
-
-        /* Draw menu title */
-        glColor3f(1.0f, 0.8f, 0.2f);
-        draw_text("LUCKY LUKE", WINDOW_WIDTH / 2 - 120, 120, 3, 1.0f, 0.8f, 0.2f);
-
-        /* Draw menu buttons */
-        int button_w = 200;
-        int button_h = 48;
-        int button_x = WINDOW_WIDTH / 2 - button_w / 2;
-        int button_y_start = 260;
-        int button_spacing = 72;
-        const char *button_labels[2] = {"GAME", "OPTIONS"};
-
-        for (int i = 0; i < 2; i++) {
-            int button_y = button_y_start + i * button_spacing;
-            int is_selected = (selection == i);
-
-            glColor4f(0.15f, 0.18f, 0.25f, 0.85f);
-            if (is_selected) {
-                glColor4f(0.25f, 0.35f, 0.55f, 0.95f);
-            }
-            glBegin(GL_QUADS);
-            glVertex2i(button_x, button_y);
-            glVertex2i(button_x + button_w, button_y);
-            glVertex2i(button_x + button_w, button_y + button_h);
-            glVertex2i(button_x, button_y + button_h);
-            glEnd();
-
-            glColor3f(0.8f, 0.8f, 0.8f);
-            glBegin(GL_LINE_LOOP);
-            glVertex2i(button_x, button_y);
-            glVertex2i(button_x + button_w, button_y);
-            glVertex2i(button_x + button_w, button_y + button_h);
-            glVertex2i(button_x, button_y + button_h);
-            glEnd();
-
-            draw_text(button_labels[i],
-                      WINDOW_WIDTH / 2 - (int)strlen(button_labels[i]) * 4 * 2,
-                      button_y + button_h / 2 - 8,
-                      2, 1.0f, 1.0f, 1.0f);
-
-            if (is_selected) {
-                glColor3f(1.0f, 0.8f, 0.0f);
-                glBegin(GL_TRIANGLES);
-                glVertex2i(button_x - 40, button_y + button_h / 2);
-                glVertex2i(button_x - 20, button_y + button_h / 2 - 10);
-                glVertex2i(button_x - 20, button_y + button_h / 2 + 10);
-                glEnd();
-            }
-        }
-
-        draw_text("ESC TO QUIT", WINDOW_WIDTH / 2 - 70, 420, 1, 0.6f, 0.6f, 0.6f);
-
-        /* Inform user that original assets are not loaded */
-        glColor3f(0.8f, 0.4f, 0.3f);
-        draw_text("RESSOURCES ORIGINALES INDISPONIBLES - MODE FALLBACK",
-                  WINDOW_WIDTH / 2 - 190, 450, 1, 0.8f, 0.5f, 0.5f);
+        /* No original BIB/BIZ assets have been positioned by the SOOL
+         * script. Refuse to substitute invented UI: report an explicit
+         * error on stdout and leave the frame empty. */
+        fprintf(stderr,
+                "ERROR: no original menu assets loaded (option.cod / option.bib / option.biz missing or not parsed).\n"
+                "       Set cd_mount in config.ini to your Lucky Luke CD mount point.\n");
     }
     draw_menu_asset_errors();
 }
