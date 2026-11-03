@@ -2749,6 +2749,7 @@ static void render_menu(int selection, int page, unsigned int tick)
         int32_t screen_pos[2];
         const int16_t *model_rot = NULL;
         int32_t model_angles[3] = {0, 0, 0};
+        int use_model_angles = 0;
         if (menu_camera.has_reference && menu_object_has_pose[object_index]) {
             const LL_BibScenePose *pose = &menu_object_poses[object_index];
             model_pos[0] = pose->position[0];
@@ -2757,6 +2758,7 @@ static void render_menu(int selection, int page, unsigned int tick)
             model_angles[0] = pose->angles[0];
             model_angles[1] = pose->angles[1];
             model_angles[2] = pose->angles[2];
+            use_model_angles = 1;
         } else {
             model_pos[0] = model->anchor[0];
             model_pos[1] = model->anchor[1];
@@ -2780,9 +2782,11 @@ static void render_menu(int selection, int page, unsigned int tick)
                     glAlphaFunc(GL_GREATER, 0.0f);
                 } else glDisable(GL_TEXTURE_2D);
                 /* Collect projected vertices first; skip element if any
-                 * vertex projects off-screen (behind/too close to camera). */
+                 * vertex projects off-screen (behind/too close to camera)
+                 * or if the face spans too much Z depth (causes extreme
+                 * perspective distortion within a single polygon). */
                 static const uint8_t quad_corners[6] = {0, 1, 3, 3, 1, 2};
-                int32_t proj_x[6], proj_y[6];
+                int32_t proj_x[6], proj_y[6], proj_z[6];
                 uint32_t proj_color[6];
                 int all_valid = 1;
                 for (uint32_t submitted = 0; submitted < (quad ? 6u : 3u); submitted++) {
@@ -2801,8 +2805,48 @@ static void render_menu(int selection, int page, unsigned int tick)
                     proj_color[submitted] = (group->type >= 4u)
                         ? element->corner_colors[attribute_corner]
                         : element->attributes;
+                    /* Compute camera-space Z for this vertex */
+                    int16_t cam_rows[3][3];
+                    ll_native_camera_rotation(menu_camera.pitch, menu_camera.yaw, cam_rows);
+                    int64_t dot_w = 0, dot_r = 0;
+                    int32_t world[3];
+                    if (model_rot != NULL) {
+                        for (unsigned r = 0; r < 3; r++) {
+                            int64_t sum = 0;
+                            for (unsigned c = 0; c < 3; c++)
+                                sum += (int64_t)model_rot[r * 3u + c] * vertex->position[c];
+                            world[r] = model_pos[r] + (int32_t)(sum / 4096);
+                        }
+                    } else if (use_model_angles) {
+                        int16_t rows[3][3];
+                        ll_native_model_rotation(model_angles, rows);
+                        for (unsigned r = 0; r < 3; r++) {
+                            int64_t sum = 0;
+                            for (unsigned c = 0; c < 3; c++)
+                                sum += (int64_t)rows[r][c] * vertex->position[c];
+                            world[r] = model_pos[r] + (int32_t)(sum / 4096);
+                        }
+                    } else {
+                        world[0] = model_pos[0] + vertex->position[0];
+                        world[1] = model_pos[1] + vertex->position[1];
+                        world[2] = model_pos[2] + vertex->position[2];
+                    }
+                    for (unsigned i = 0; i < 3; i++) {
+                        dot_w += (int64_t)cam_rows[2][i] * world[i];
+                        dot_r += (int64_t)cam_rows[2][i] * menu_camera.reference[i];
+                    }
+                    proj_z[submitted] = (int32_t)((dot_w - dot_r) / 4096) + (int32_t)menu_camera_depth;
                 }
                 if (!all_valid) continue;
+
+                /* Reject faces with excessive Z range (perspective
+                 * distortion across a single polygon). */
+                int32_t z_min = proj_z[0], z_max = proj_z[0];
+                for (uint32_t s = 1; s < (quad ? 6u : 3u); s++) {
+                    if (proj_z[s] < z_min) z_min = proj_z[s];
+                    if (proj_z[s] > z_max) z_max = proj_z[s];
+                }
+                if (z_max - z_min > z_min / 2) continue;
 
                 /* FUN_0048c5b0 submits geometry 0,1,3,2 against attributes
                  * in strip order. Keep source geometry on its perimeter. */
