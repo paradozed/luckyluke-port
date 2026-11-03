@@ -2289,17 +2289,6 @@ static const LL_MenuMaterial *menu_material(uint16_t object_index)
 }
 
 /* Model rotation uses FUN_0047c630, distinct from the camera builder. */
-static void menu_apply_model_rotation(const int32_t angles[3])
-{
-    int16_t rows[3][3];
-    ll_native_model_rotation(angles,rows);
-    GLdouble matrix[16] = {0};
-    for (unsigned r = 0; r < 3; r++)
-        for (unsigned col = 0; col < 3; col++) matrix[col * 4u + r] = rows[r][col]/4096.0;
-    matrix[15] = 1;
-    glMultMatrixd(matrix);
-}
-
 static int menu_build_animation_pose(uint32_t model_index, uint16_t selector, uint32_t frame, uint32_t fraction,
                                  int play_once, LL_BibVertex *vertices, const LL_BibPackedPose *initial,
                                  uint32_t initial_fraction, LL_BibPackedPose *evaluated)
@@ -2549,6 +2538,56 @@ static void menu_render_sprite_groups(void)
     }
 }
 
+/* Project a model-space vertex through the model transform and camera
+ * to 2D screen coordinates in window space. Returns 0 if the camera
+ * is not configured. model_rot is a 9-int16 fixed-point matrix (/4096)
+ * or NULL; model_angles are Euler angles or NULL. */
+static int project_model_vertex(const int16_t vertex_pos[3],
+                                const int32_t model_pos[3],
+                                const int16_t *model_rot,
+                                const int32_t model_angles[3],
+                                int32_t screen_out[2])
+{
+    if (!menu_camera.has_reference || menu_camera.projection == 0)
+        return 0;
+
+    /* Apply model transform: world = model_pos + model_rot * vertex */
+    int32_t world[3];
+    if (model_rot != NULL) {
+        for (unsigned r = 0; r < 3; r++) {
+            int64_t sum = 0;
+            for (unsigned c = 0; c < 3; c++)
+                sum += (int64_t)model_rot[r * 3u + c] * vertex_pos[c];
+            world[r] = model_pos[r] + (int32_t)(sum / 4096);
+        }
+    } else if (model_angles != NULL) {
+        int16_t rows[3][3];
+        ll_native_model_rotation(model_angles, rows);
+        for (unsigned r = 0; r < 3; r++) {
+            int64_t sum = 0;
+            for (unsigned c = 0; c < 3; c++)
+                sum += (int64_t)rows[r][c] * vertex_pos[c];
+            world[r] = model_pos[r] + (int32_t)(sum / 4096);
+        }
+    } else {
+        world[0] = model_pos[0] + vertex_pos[0];
+        world[1] = model_pos[1] + vertex_pos[1];
+        world[2] = model_pos[2] + vertex_pos[2];
+    }
+
+    /* Project through camera to DirectDraw 512x256 screen space */
+    int32_t dd_screen[2];
+    ll_native_camera_screen(world, menu_camera.reference,
+                           menu_camera.pitch, menu_camera.yaw,
+                           menu_camera_depth, menu_camera.projection,
+                           dd_screen);
+
+    /* Scale from 512x256 to window space */
+    screen_out[0] = dd_screen[0] * WINDOW_WIDTH / 512;
+    screen_out[1] = dd_screen[1] * WINDOW_HEIGHT / 256;
+    return 1;
+}
+
 static void render_menu(int selection, int page, unsigned int tick)
 {
     (void)selection;
@@ -2559,41 +2598,15 @@ static void render_menu(int selection, int page, unsigned int tick)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     menu_render_background_sprites();
 
-    /* ---- Render 3D BIB scene objects with camera projection ---- */
-    glEnable(GL_DEPTH_TEST);
+    /* ---- Render 3D BIB scene objects with camera-to-2D projection ---- */
+    glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
-    if (menu_camera.has_reference && menu_camera.projection != 0) {
-        /* Original driver: project world-space vertices through camera,
-         * scale from DirectDraw 512x256 surface to 640x480 window. */
-        double focal = (double)menu_camera.projection * (640.0 / 448.0);
-        double aspect = (double)WINDOW_WIDTH / (double)WINDOW_HEIGHT;
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glFrustum(-focal, focal,
-                  -focal / aspect, focal / aspect,
-                  1.0, 200000.0);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-        int16_t rows[3][3];
-        int32_t translation[3];
-        ll_native_camera_view(menu_camera.pitch, menu_camera.yaw,
-                              menu_camera.reference, menu_camera_depth,
-                              rows, translation);
-        GLdouble view[16] = {0};
-        for (unsigned r = 0; r < 3; r++)
-            for (unsigned c = 0; c < 3; c++)
-                view[c * 4u + r] = (double)rows[r][c] / 4096.0;
-        view[15] = 1.0;
-        for (unsigned r = 0; r < 3; r++) view[12u + r] = (double)translation[r];
-        glMultMatrixd(view);
-    } else {
-        /* No camera yet: fall back to screen-space orthographic. */
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-    }
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
     /* ---- Advance BIZ sprite animations (time-based frame progression) ---- */
     for (size_t object_index = 0; object_index < menu_scene_object_count; object_index++) {
         if (!menu_scene_objects[object_index].is_biz_sprite ||
@@ -2712,20 +2725,31 @@ static void render_menu(int selection, int page, unsigned int tick)
                 }
             }
         }
-        glPushMatrix();
+        /* Project model through camera to 2D screen space and draw.
+         * Objects with poses use pose position/angles; others use
+         * model anchor + orientation matrix. */
+        int32_t model_pos[3];
+        int32_t screen_pos[2];
+        const int16_t *model_rot = NULL;
+        int32_t model_angles[3] = {0, 0, 0};
+        int have_model_transform;
         if (menu_camera.has_reference && menu_object_has_pose[object_index]) {
             const LL_BibScenePose *pose = &menu_object_poses[object_index];
-            glTranslated(pose->position[0], pose->position[1], pose->position[2]);
-            menu_apply_model_rotation(pose->angles);
+            model_pos[0] = pose->position[0];
+            model_pos[1] = pose->position[1];
+            model_pos[2] = pose->position[2];
+            model_angles[0] = pose->angles[0];
+            model_angles[1] = pose->angles[1];
+            model_angles[2] = pose->angles[2];
+            have_model_transform = 1;
         } else {
-            glTranslated(model->anchor[0], model->anchor[1], model->anchor[2]);
-            GLdouble basis[16] = {0};
-            for (unsigned r = 0; r < 3; r++)
-                for (unsigned col = 0; col < 3; col++)
-                    basis[col * 4u + r] = model->orientation[r * 3u + col] / 4096.0;
-            basis[15] = 1;
-            glMultMatrixd(basis);
+            model_pos[0] = model->anchor[0];
+            model_pos[1] = model->anchor[1];
+            model_pos[2] = model->anchor[2];
+            model_rot = model->orientation;
+            have_model_transform = 1;
         }
+
         for (uint32_t group_index = 0; group_index < model->group_count; group_index++) {
             const LL_BibGeometryGroup *group = &model->groups[group_index];
             int quad = (group->type & 1u) != 0;
@@ -2769,13 +2793,17 @@ static void render_menu(int selection, int page, unsigned int tick)
                     if (texture != NULL && texture->texture != 0)
                         glTexCoord2f((float)(element->corner_data[attribute_corner][0] - texture->sprite.texture_x) / texture->width,
                                      (float)(element->corner_data[attribute_corner][1] - texture->sprite.texture_y) / texture->height);
-                    glVertex3d(vertex->position[0], vertex->position[1], vertex->position[2]);
+                    if (!have_model_transform ||
+                        project_model_vertex(vertex->position, model_pos,
+                                             model_rot, model_angles,
+                                             screen_pos)) {
+                        glVertex2i(screen_pos[0], screen_pos[1]);
+                    }
                 }
                 glEnd();
                 glDisable(GL_ALPHA_TEST);
             }
         }
-        glPopMatrix();
     }
     glDisable(GL_CULL_FACE);
     menu_render_sprite_groups();
