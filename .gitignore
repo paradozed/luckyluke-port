@@ -2,6 +2,7 @@
 *.dll
 *.log
 *.iso
+*.bin
 build/
 work/
 iso_extract/
