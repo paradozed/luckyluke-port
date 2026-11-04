@@ -270,6 +270,20 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             group->center[axis]=(int32_t)(int16_t)args[5u+axis]*100;
         return 1;
     }
+    case 0x53: { /* FUN_00412540: set four words on this orbital group. */
+        ARITY(4);
+        LL_LevelOrbitalGroup *group=NULL;
+        for (unsigned i=0;i<260;i++) {
+            if (script->orbital_groups[i].present &&
+                script->orbital_groups[i].wrapper_instance==script->dispatch_context) {
+                group=&script->orbital_groups[i];break;
+            }
+        }
+        if (!group)
+            return fail(script,"orbital group word setter requires its preceding 0x39 setup");
+        for (unsigned i=0;i<4;i++) group->native_words[i]=args[i];
+        return 1;
+    }
     case 0x7a: { /* FUN_00419fc0: attach a bounded skeletal child to this wrapper. */
         ARITY(4);
         if (args[1]>=script->program.function_count || args[3]<10)

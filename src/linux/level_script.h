@@ -25,6 +25,7 @@ typedef struct {
     int16_t scale, angle_step;
     int32_t center[3];
     uint32_t descriptor_offset;
+    uint16_t native_words[4];
 } LL_LevelOrbitalGroup;
 
 typedef struct {
