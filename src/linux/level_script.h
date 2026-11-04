@@ -7,12 +7,19 @@
 #include <stdio.h>
 
 typedef struct {
+    uint16_t target_context;
+    uint16_t flags;
+    uint8_t active, callback_mode;
+} LL_LevelCollisionLink;
+
+typedef struct {
     LL_SoolVM vm;
     uint16_t state;
     uint16_t instance;
     uint16_t requested_state;
     int state_requested;
     int body_done, blocked;
+    LL_LevelCollisionLink collision_links[3];
     char error[256];
 } LL_LevelScriptContext;
 

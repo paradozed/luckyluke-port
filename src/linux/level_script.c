@@ -159,6 +159,34 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         memset(state->scene_sprite_slots,0,sizeof(state->scene_sprite_slots));
         state->scene_sprite_manager_registered=1;
         return 1;
+    case 0xf5: { /* FUN_004165e0: register a bounded collision callback link. */
+        ARITY(2);
+        if (args[0]>=script->program.function_count ||
+            script->contexts[args[0]].instance>=260 ||
+            !script->objects[script->contexts[args[0]].instance].present)
+            return fail(script,"collision link target is not a registered wrapper context");
+        LL_LevelScriptContext *owner=&script->contexts[script->dispatch_context];
+        uint16_t flags=(uint16_t)args[1];
+        uint8_t mode=(uint8_t)(flags&7u);
+        unsigned slot=3;
+        for (unsigned i=0;i<3;i++) {
+            if (owner->collision_links[i].active &&
+                owner->collision_links[i].target_context==args[0]) { slot=i;break; }
+            if (!owner->collision_links[i].active && slot==3) slot=i;
+        }
+        if (slot==3) return fail(script,"collision callback context has no free link slot");
+        LL_LevelCollisionLink *link=&owner->collision_links[slot];
+        if (mode==7) {
+            if (link->active && (link->flags&0xc0u))
+                return fail(script,"collision detach requires unported target flag callbacks");
+            memset(link,0,sizeof(*link));
+            return 1;
+        }
+        link->active=1;link->target_context=args[0];
+        link->flags=(uint16_t)(flags&0x138u);
+        link->callback_mode=(uint8_t)(mode<=3?mode:0xffu);
+        return 1;
+    }
     case 0x72: { /* FUN_00418620: toggle a registered wrapper callback. */
         ARITY(2);
         if (args[0]>=260 || !script->objects[args[0]].present)
