@@ -241,6 +241,40 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             return fail(script,"callback state transition requires native wrapper dispatch");
         return 1;
     }
+    case 0x7a: { /* FUN_00419fc0: attach a bounded skeletal child to this wrapper. */
+        ARITY(4);
+        if (args[1]>=script->program.function_count || args[3]<10)
+            return fail(script,"skeletal attachment needs a target context and zero-root mode");
+        uint16_t parent=script->contexts[script->dispatch_context].instance;
+        uint16_t child=script->contexts[args[1]].instance;
+        if (parent>=260 || child>=260 || parent==child ||
+            !script->objects[parent].present || !script->objects[child].present ||
+            !script->objects[parent].pose || !script->objects[child].pose ||
+            script->objects[parent].kind==5 || script->objects[parent].kind==7 ||
+            script->objects[child].kind==5 || script->objects[child].kind==7)
+            return fail(script,"skeletal attachment requires two registered model wrappers");
+        LL_LevelSkeletalAttachment *attachment=NULL;
+        for (unsigned i=0;i<script->skeletal_attachment_count;i++)
+            if (script->skeletal_attachments[i].child_instance==child) {
+                attachment=&script->skeletal_attachments[i];break;
+            }
+        if (!attachment) {
+            if (script->skeletal_attachment_count>=256)
+                return fail(script,"skeletal attachment registry is full");
+            attachment=&script->skeletal_attachments[script->skeletal_attachment_count++];
+        }
+        attachment->child_instance=child;attachment->parent_instance=parent;
+        attachment->animation_selector=args[2];
+        attachment->attachment_mode=(uint16_t)(args[3]-10u);
+        memset(attachment->root_offset,0,sizeof(attachment->root_offset));
+        /* FUN_00419c90 installs (blend mode, -1, selector, -1, flags). */
+        state->animation_transition[0]=(int16_t)args[0];
+        state->animation_transition[1]=-1;
+        state->animation_transition[2]=(int16_t)args[2];
+        state->animation_transition[3]=-1;
+        state->animation_transition[4]=(int16_t)(args[3]-10u);
+        return 1;
+    }
     case 0x11e: { /* FUN_004156c0: select a BIB pose as the camera target. */
         ARITY(2);
         LL_BibScenePose target;

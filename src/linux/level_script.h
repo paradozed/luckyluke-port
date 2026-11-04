@@ -13,6 +13,12 @@ typedef struct {
 } LL_LevelCollisionLink;
 
 typedef struct {
+    uint16_t child_instance, parent_instance;
+    uint16_t animation_selector, attachment_mode;
+    int32_t root_offset[3];
+} LL_LevelSkeletalAttachment;
+
+typedef struct {
     LL_SoolVM vm;
     uint16_t state;
     uint16_t instance;
@@ -42,6 +48,7 @@ typedef struct {
     int32_t camera_bounds[4];
     int32_t camera_target[3];
     uint8_t camera_target_active;
+    int16_t animation_transition[5];
     unsigned path_capacity, pose_capacity, pose_count;
     uint16_t pose_groups[10];
 } LL_LevelNativeSetup;
@@ -84,6 +91,8 @@ typedef struct {
     int32_t (*model_bounds)[6];
     uint8_t animation_preloaded[LL_BIB_MAX_SELECTORS];
     unsigned object_count, static_model_count;
+    LL_LevelSkeletalAttachment skeletal_attachments[256];
+    unsigned skeletal_attachment_count;
     int grid_loaded;
     FILE *trace;
     uint32_t updates, calls, supported_calls, blocked_count;
