@@ -29,6 +29,7 @@ typedef struct {
     uint8_t native_byte_2;
     uint8_t has_member_positions;
     int32_t member_positions[64][3];
+    int32_t member_roots[64][3];
 } LL_LevelOrbitalGroup;
 
 typedef struct {

@@ -272,7 +272,31 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
                     ((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
                 memcpy(&group->member_positions[member][axis],&word,sizeof(word));
             }
+        memcpy(group->member_roots,group->member_positions,sizeof(group->member_roots));
         /* Mesh creation, projection and collision dispatch remain separate. */
+        return 1;
+    }
+    case 0x97: { /* FUN_0041be30: position members relative to their saved origins. */
+        ARITY(4);
+        if (args[0]>=260)
+            return fail(script,"sprite group translation instance exceeds registry bounds");
+        LL_LevelOrbitalGroup *group=&script->orbital_groups[args[0]];
+        if (!group->present) {
+            if (script->objects[args[0]].present)
+                return fail(script,"sprite group translation target is an ordinary wrapper");
+            return 1; /* Native absent-wrapper lookup is explicitly ignored. */
+        }
+        if (!group->has_member_positions || group->member_count>64)
+            return fail(script,"sprite group translation requires decoded member origins");
+        for (unsigned member=0;member<group->member_count;member++)
+            for (unsigned axis=0;axis<3;axis++) {
+                /* Preserve x86 32-bit addition without signed C overflow.
+                 * Native offsets are raw units; they are not multiplied by100.
+                 * Saved positions stay fixed across repeated calls. */
+                uint32_t word=(uint32_t)group->member_positions[member][axis]+
+                    (uint32_t)(int32_t)(int16_t)args[axis+1];
+                memcpy(&group->member_roots[member][axis],&word,sizeof(word));
+            }
         return 1;
     }
     case 0x39: { /* FUN_004121d0: configure an orbital sprite-group wrapper. */

@@ -1,5 +1,15 @@
 # Abilene SOOL: native execution progress
 
+## Sprite-group follow-up
+
+Commands `0x96` and `0x97` now retain bounded BIB member origins and apply
+signed raw-unit offsets to separate root positions. Repeated translations
+always use the saved origins, matching `FUN_0041be30`; meshes, projection and
+collision effects are still absent. The five contexts84..88 reach state1 and
+stop at variable `0x28`. The latest 24-update trace reports1477 calls,
+1437 supported,40 blocked,88 objects and169 static models. Older measurements
+below predate this follow-up.
+
 ## Scope and observed result
 
 The native runtime loads the original `ABILENE/abilene.cod`, retains its
