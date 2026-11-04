@@ -31,6 +31,11 @@ typedef struct {
 typedef struct {
     int present, cloned;
     uint32_t model_index;
+    uint16_t wrapper_flags, motion_word;
+    uint8_t visible, update_enabled, reduced, kind;
+    int32_t motion[3];
+    int32_t *bounds;
+    int32_t private_bounds[6];
     LL_BibScenePose *pose; /* shared descriptor for0x65, private copy for0x68 */
     LL_BibScenePose private_pose;
 } LL_LevelScriptObject;
@@ -44,6 +49,8 @@ typedef struct {
     LL_LevelNativeSetup native;
     LL_LevelScriptObject objects[260];
     LL_BibScenePose *model_poses;
+    int32_t (*model_bounds)[6];
+    uint8_t animation_preloaded[LL_BIB_MAX_SELECTORS];
     unsigned object_count, static_model_count;
     int grid_loaded;
     FILE *trace;

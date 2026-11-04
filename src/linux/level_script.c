@@ -16,6 +16,7 @@ void ll_level_script_close(LL_LevelScript *script)
     free(script->contexts);free(script->condition_vm);
     free(script->code_data);free(script->bib_data);
     free(script->model_poses);
+    free(script->model_bounds);
     memset(script,0,sizeof(*script));
 }
 
@@ -43,11 +44,15 @@ int ll_level_script_open(LL_LevelScript *script,
         if (!ll_bib_open(&script->bib,script->bib_data,bib_size))
             return fail(script,ll_bib_error(&script->bib));
         script->model_poses=calloc(script->bib.model_count,sizeof(*script->model_poses));
-        if (script->bib.model_count && !script->model_poses)
+        script->model_bounds=calloc(script->bib.model_count,sizeof(*script->model_bounds));
+        if (script->bib.model_count && (!script->model_poses || !script->model_bounds))
             return fail(script,"cannot allocate mutable scene-root poses");
-        for (unsigned i=0;i<script->bib.model_count;i++)
+        for (unsigned i=0;i<script->bib.model_count;i++) {
             memcpy(script->model_poses[i].position,script->bib.models[i].anchor,
                 sizeof(script->model_poses[i].position));
+            memcpy(script->model_bounds[i],script->bib.models[i].bounds_min,3*sizeof(int32_t));
+            memcpy(script->model_bounds[i]+3,script->bib.models[i].bounds_max,3*sizeof(int32_t));
+        }
     }
     script->contexts=calloc(script->program.function_count,sizeof(*script->contexts));
     script->condition_vm=calloc(1,sizeof(*script->condition_vm));
@@ -74,8 +79,46 @@ int ll_level_script_open(LL_LevelScript *script,
 static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, size_t argc)
 {
     LL_LevelNativeSetup *state=&script->native;
+    uint16_t current=script->contexts[script->dispatch_context].instance;
+    LL_LevelScriptObject *object=current<260 && script->objects[current].present ? &script->objects[current] : NULL;
 #define ARITY(n) do { if (argc!=(n)) return fail(script,"wrong native command arity"); } while (0)
     switch (id) {
+    case 0x16: case 0x11: case 0x17: {
+        ARITY(2);
+        if (!object || !object->bounds) return fail(script,"bounds setter requires a scene object");
+        unsigned axis=id==0x16 ? 0u : id==0x11 ? 1u : 2u;
+        object->bounds[axis]=(int16_t)args[0];object->bounds[axis+3]=(int16_t)args[1];
+        return 1;
+    }
+    case 0x1a: case 0x1c:
+        ARITY(3);
+        if (!object || !object->pose) return fail(script,"root setter requires a scene object");
+        for (unsigned i=0;i<3;i++) {
+            if (id==0x1a) object->pose->angles[i]=(int16_t)args[i];
+            else object->pose->position[i]=(int16_t)args[i]*100;
+        }
+        return 1;
+    case 0x18:
+        ARITY(4);
+        if (!object) return fail(script,"motion setter requires a scene object");
+        for (unsigned i=0;i<3;i++) object->motion[i]=(int16_t)args[i];
+        object->motion_word=args[3];return 1;
+    case 0x2d:
+        ARITY(2);
+        if (!object) return fail(script,"wrapper flags setter requires a scene object");
+        object->wrapper_flags=(uint16_t)((object->wrapper_flags&~4u)|(args[0]?4u:0u));return 1;
+    case 0x10:
+        ARITY(2);
+        if (args[0]<260 && script->objects[args[0]].present)
+            script->objects[args[0]].visible=args[1]!=0;
+        return 1; /* FUN_004101e0 explicitly ignores absent targets. */
+    case 0x0a: /* FUN_00418e00/00418da0/00483cf0: resolve frame offsets once.
+                * The bounded BIB reader already retains resolved record spans. */
+        ARITY(1);
+        if (args[0]>=LL_BIB_MAX_SELECTORS || !ll_bib_get_animation_table(&script->bib,args[0]))
+            return fail(script,"animation preload selector has no bounded frame directory");
+        script->animation_preloaded[args[0]]=1;
+        return 1;
     case 0x64: /* FUN_0041a680: retain validated catalogue/grid as scene data.
                 * Rendering, relocation into world cells and collisions remain separate. */
         ARITY(2);
@@ -94,10 +137,13 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         while (model<script->bib.model_count && script->bib.models[model].descriptor_offset!=offset) model++;
         if (model==script->bib.model_count || script->objects[args[1]].present)
             return fail(script,"model descriptor missing or instance already registered");
-        LL_LevelScriptObject *object=&script->objects[args[1]];
+        object=&script->objects[args[1]];
         object->present=1;object->cloned=id==0x68;object->model_index=model;
         object->private_pose=script->model_poses[model];
         object->pose=object->cloned ? &object->private_pose : &script->model_poses[model];
+        memcpy(object->private_bounds,script->model_bounds[model],sizeof(object->private_bounds));
+        object->bounds=object->cloned ? object->private_bounds : script->model_bounds[model];
+        object->wrapper_flags=1;object->visible=1;object->update_enabled=1;
         script->contexts[script->dispatch_context].instance=args[1];
         script->object_count++;return 1;
     }
