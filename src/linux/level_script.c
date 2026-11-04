@@ -241,6 +241,40 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             return fail(script,"callback state transition requires native wrapper dispatch");
         return 1;
     }
+    case 0x96: { /* FUN_0041b970: pose-driven sprite group setup. */
+        ARITY(6);
+        int registered=0;
+        for (unsigned i=0;i<state->pose_count;i++)
+            if (state->pose_groups[i]==args[0]) registered=1;
+        const unsigned char *record;
+        size_t size;
+        uint32_t descriptor;
+        if (!registered || args[2]>=260 ||
+            !ll_bib_get_indexed_record(&script->bib,args[0],args[1],&record,&size) || size<4)
+            return fail(script,"sprite group requires a registered BIB group and bounded record");
+        unsigned count=(unsigned)record[0]|((unsigned)record[1]<<8);
+        if (!count || count>64 || size<4u+16u*count)
+            return fail(script,"sprite group position record is truncated or exceeds 64 members");
+        if (!ll_bib_get_selector_offset(&script->bib,args[4],&descriptor))
+            return fail(script,"sprite group resource selector is invalid");
+        LL_LevelOrbitalGroup *group=&script->orbital_groups[args[2]];
+        if (!group->present) script->orbital_group_count++;
+        memset(group,0,sizeof(*group));
+        group->present=1;group->callback_registered=1;group->native_byte_2=1;
+        group->wrapper_instance=args[2];group->model_index=UINT16_MAX;
+        group->model_selector=args[4];group->descriptor_offset=descriptor;
+        group->member_count=(uint16_t)count;group->scale=(int16_t)args[3];
+        group->member_parameter=args[5];group->has_member_positions=1;
+        for (unsigned member=0;member<count;member++)
+            for (unsigned axis=0;axis<3;axis++) {
+                const unsigned char *p=record+4u+16u*member+4u*axis;
+                uint32_t word=(uint32_t)p[0]|((uint32_t)p[1]<<8)|
+                    ((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
+                memcpy(&group->member_positions[member][axis],&word,sizeof(word));
+            }
+        /* Mesh creation, projection and collision dispatch remain separate. */
+        return 1;
+    }
     case 0x39: { /* FUN_004121d0: configure an orbital sprite-group wrapper. */
         ARITY(10);
         if (!args[3] || args[3]>64 || args[9]>=260)

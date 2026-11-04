@@ -27,6 +27,8 @@ typedef struct {
     uint32_t descriptor_offset;
     uint16_t native_words[4];
     uint8_t native_byte_2;
+    uint8_t has_member_positions;
+    int32_t member_positions[64][3];
 } LL_LevelOrbitalGroup;
 
 typedef struct {
