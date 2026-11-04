@@ -8,13 +8,34 @@ static int fail(LL_LevelScript *script, const char *message)
     return 0;
 }
 
+static uint32_t animation_clock(uint32_t update)
+{
+    return (uint32_t)(((uint64_t)update*60u/24u)*31u);
+}
+
+static int sprite_frame_apply(LL_LevelScript *script, LL_LevelScriptObject *object,
+                              uint16_t frame_index)
+{
+    LL_BibSpriteFrame frame;LL_BizObject biz_object;LL_BizSprite sprite;
+    if (!ll_bib_get_sprite_frame(&script->bib,object->sprite_selector,frame_index,&frame) ||
+        !ll_biz_get_object(&script->biz,frame.object_index,&biz_object) ||
+        !ll_biz_get_sprite(&script->biz,biz_object.sprite_index,&sprite)) return 0;
+    object->sprite_frame=frame_index;object->biz_object=frame.object_index;
+    object->biz_sprite=biz_object.sprite_index;object->sprite_offset[0]=frame.offset_x;
+    object->sprite_offset[1]=frame.offset_y;
+    object->sprite_width=(uint16_t)((uint16_t)sprite.width_units*4u);
+    object->sprite_height=(uint16_t)sprite.height;
+    return 1;
+}
+
 void ll_level_script_close(LL_LevelScript *script)
 {
     if (!script) return;
     ll_sool_program_close(&script->program);
     ll_bib_close(&script->bib);
+    ll_biz_close(&script->biz);
     free(script->contexts);free(script->condition_vm);
-    free(script->code_data);free(script->bib_data);
+    free(script->code_data);free(script->bib_data);free(script->biz_data);
     free(script->model_poses);
     free(script->model_bounds);
     memset(script,0,sizeof(*script));
@@ -76,6 +97,25 @@ int ll_level_script_open(LL_LevelScript *script,
     return 1;
 }
 
+int ll_level_script_set_biz(LL_LevelScript *script,
+                            const unsigned char *biz, size_t biz_size)
+{
+    if (!script || !script->loaded || !biz || !biz_size ||
+        biz_size>64u*1024u*1024u || script->updates)
+        return script ? fail(script,"BIZ must be attached before bounded SOOL updates") : 0;
+    unsigned char *owned=malloc(biz_size);
+    if (!owned) return fail(script,"cannot allocate Abilene BIZ input");
+    memcpy(owned,biz,biz_size);
+    LL_BizFile parsed={0};
+    if (!ll_biz_open(&parsed,owned,biz_size)) {
+        snprintf(script->error,sizeof(script->error),"%s",ll_biz_error(&parsed));
+        ll_biz_close(&parsed);free(owned);return 0;
+    }
+    ll_biz_close(&script->biz);free(script->biz_data);
+    script->biz=parsed;script->biz_data=owned;
+    return 1;
+}
+
 static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, size_t argc)
 {
     LL_LevelNativeSetup *state=&script->native;
@@ -112,6 +152,115 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         if (args[0]<260 && script->objects[args[0]].present)
             script->objects[args[0]].visible=args[1]!=0;
         return 1; /* FUN_004101e0 explicitly ignores absent targets. */
+    case 0x5b: /* FUN_00414240 */
+        ARITY(1);
+        if (!args[0]) state->native_flags|=1u;
+        else state->native_flags=0;
+        return 1;
+    case 0x45: { /* FUN_004118b0: bind a wrapper slot and set its +0x14 word. */
+        ARITY(3);
+        if (args[0]>=260 || args[1]>=256 || !script->objects[args[0]].present)
+            return fail(script,"wrapper registration needs a live instance and slot0..255");
+        state->object_registry[args[1]]=(uint16_t)(args[0]+1u);
+        script->objects[args[0]].native_wrapper_word=args[2];
+        script->objects[args[0]].visible=args[2]!=0;
+        return 1;
+    }
+    case 0x2a: /* FUN_0040b400 / DAT_004e8580 */
+        ARITY(1);state->level_event_latch=(uint8_t)args[0];return 1;
+    case 0x0b: case 0x14: case 0x1b: { /* Native skeletal animation scheduler. */
+        ARITY(id==0x14?3:1);
+        if (!object || !object->pose || object->kind==5 || object->kind==7)
+            return fail(script,"skeletal animation requires a registered model instance");
+        uint16_t selector=args[0];
+        const LL_BibAnimationTable *table=ll_bib_get_animation_table(&script->bib,selector);
+        if (!table || !table->record_count || !table->record_type)
+            return fail(script,"animation selector has no bounded frame table");
+        if (table->loop_displacement[0] || table->loop_displacement[1] || table->loop_displacement[2])
+            return fail(script,"animation loop root displacement is not implemented");
+        uint16_t first=0,last=(uint16_t)(table->record_count-1u);
+        if (id==0x14) {
+            first=args[1];last=args[2];
+            if (last==UINT16_MAX) last=(uint16_t)(table->record_count-1u);
+            if (first>last || last>=table->record_count)
+                return fail(script,"animation range is outside the bounded frame table");
+        }
+        if (id!=0x1b || object->animation_selector!=selector) {
+            object->animation_started=animation_clock(script->updates);
+            object->animation_frame=UINT16_MAX;
+        }
+        object->animation_selector=selector;object->animation_first=first;
+        object->animation_last=last;object->animation_active=1;
+        object->animation_once=(uint8_t)(id!=0x1b);
+        LL_LevelScriptContext *owner=&script->contexts[script->dispatch_context];
+        if (id!=0x1b) {
+            object->animation_callback_owner=(uint16_t)(script->dispatch_context+1u);
+            owner->vm.host_animation_wait=1;owner->vm.host_yield=1;
+        } else owner->vm.host_animation_wait=0;
+        return 1;
+    }
+    case 0x6b: { /* FUN_0041b740: restart the full BIB sequence on a sprite. */
+        ARITY(3);
+        if (!object || (object->kind!=5 && object->kind!=7))
+            return fail(script,"BIB sequence command requires a world or screen sprite");
+        LL_BibSelector section;
+        uint16_t previous_selector=object->sprite_selector;
+        object->sprite_selector=args[0];
+        if (!ll_bib_get_selector(&script->bib,args[0],&section) || !section.is_section ||
+            section.size<12u || !sprite_frame_apply(script,object,(uint16_t)0)) {
+            object->sprite_selector=previous_selector;
+            return fail(script,"BIB sprite sequence lacks a bounded frame header or BIZ record");
+        }
+        const unsigned char *header=script->bib.raw_data+section.offset;
+        uint16_t frame_count=(uint16_t)(header[2]|((uint16_t)header[3]<<8));
+        if (!frame_count || frame_count>(section.size-12u)/12u) {
+            object->sprite_selector=previous_selector;
+            return fail(script,"BIB sprite sequence frame count exceeds its section");
+        }
+        object->sprite_animation_first=0;
+        object->sprite_animation_last=(uint16_t)(frame_count-1u);
+        object->sprite_animation_started_ms=(uint32_t)((uint64_t)script->updates*1000u/24u);
+        object->sprite_animation_active=1;object->sprite_scale=(int16_t)args[2];
+        return 1;
+    }
+    case 0x6e: case 0x71: { /* FUN_00418350 / screen-sprite sibling constructor. */
+        ARITY(3);
+        uint16_t instance=args[0],selector=args[1];
+        if (!script->bib.valid || !script->biz.valid || instance>=260 ||
+            script->objects[instance].present)
+            return fail(script,"sprite constructor needs BIB/BIZ resources and a free instance");
+        LL_BibSpriteFrame frame;
+        LL_BizObject object_record;
+        LL_BizSprite sprite_record;
+        if (!ll_bib_get_sprite_frame(&script->bib,selector,0,&frame) ||
+            !ll_biz_get_object(&script->biz,frame.object_index,&object_record) ||
+            !ll_biz_get_sprite(&script->biz,object_record.sprite_index,&sprite_record))
+            return fail(script,"sprite selector references an invalid BIB/BIZ frame or object");
+        LL_LevelScriptObject *created=&script->objects[instance];
+        created->present=1;created->kind=id==0x6e?5:7;created->visible=(uint8_t)(id==0x71);
+        created->update_enabled=(uint8_t)(id==0x6e);created->wrapper_flags=1;
+        created->pose=&created->private_pose;
+        created->sprite_selector=selector;created->biz_object=frame.object_index;
+        created->biz_sprite=object_record.sprite_index;created->sprite_scale=(int16_t)args[2];
+        created->sprite_frame=0;created->sprite_offset[0]=frame.offset_x;
+        created->sprite_offset[1]=frame.offset_y;
+        created->sprite_width=(uint16_t)((uint16_t)sprite_record.width_units*4u);
+        created->sprite_height=(uint16_t)sprite_record.height;
+        script->contexts[script->dispatch_context].instance=instance;
+        script->object_count++;return 1;
+    }
+    case 0x6f: { /* FUN_00418580 -> FUN_00479de0: wake an ordinary model wrapper. */
+        ARITY(2);
+        if (args[0]>=260 || !script->objects[args[0]].present) return 1;
+        LL_LevelScriptObject *target=&script->objects[args[0]];
+        target->callback_kind=(uint8_t)args[1];
+        if ((target->wrapper_flags&1u) && target->kind!=5 && target->kind!=7) {
+            if (target->reduced)
+                return fail(script,"reduced model wake requires native descriptor expansion");
+            target->update_enabled=1;
+        }
+        return 1;
+    }
     case 0x0a: /* FUN_00418e00/00418da0/00483cf0: resolve frame offsets once.
                 * The bounded BIB reader already retains resolved record spans. */
         ARITY(1);
@@ -139,6 +288,7 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             return fail(script,"model descriptor missing or instance already registered");
         object=&script->objects[args[1]];
         object->present=1;object->cloned=id==0x68;object->model_index=model;
+        object->kind=script->bib.models[model].type;
         object->private_pose=script->model_poses[model];
         object->pose=object->cloned ? &object->private_pose : &script->model_poses[model];
         memcpy(object->private_bounds,script->model_bounds[model],sizeof(object->private_bounds));
@@ -215,6 +365,50 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
 #undef ARITY
 }
 
+static int native_variable(LL_LevelScript *script, uint16_t id,
+                           const uint16_t *args, size_t argc, uint16_t *result)
+{
+    LL_LevelNativeSetup *state=&script->native;
+    switch (id) {
+    case 0x38: /* FUN_0040bdc0 */
+        if (argc) return fail(script,"wrong native variable arity");
+        *result=(uint16_t)((state->native_flags&1u)!=0);
+        if (*result) state->native_flags|=4u;
+        return 1;
+    case 0x44: /* FUN_0040c360 */
+        if (argc) return fail(script,"wrong native variable arity");
+        *result=state->native_word_44?state->native_word_44:3;
+        return 1;
+    case 0x2a: /* FUN_0040b3d0 */
+        if (argc) return fail(script,"wrong native variable arity");
+        *result=state->level_event_latch;return 1;
+    case 0x26: { /* FUN_0040aca0: inclusive AABB test against a BIB pose box. */
+        if (argc!=3 || args[0]>=260 || !script->objects[args[0]].present)
+            return fail(script,"collision query requires a registered object and pose index");
+        LL_LevelScriptObject *object=&script->objects[args[0]];
+        if (!object->bounds || !object->pose)
+            return fail(script,"collision query target has no model bounds/root pose");
+        LL_BibScenePose box;
+        if (!ll_bib_get_scene_pose(&script->bib,args[1],args[2],&box)) {
+            *result=0;return 1; /* Native null pose result is explicitly false. */
+        }
+        for (unsigned axis=0;axis<3;axis++) {
+            int32_t object_min=(int32_t)((uint32_t)object->bounds[axis]+
+                                         (uint32_t)object->pose->position[axis]);
+            int32_t object_max=(int32_t)((uint32_t)object->bounds[axis+3]+
+                                         (uint32_t)object->pose->position[axis]);
+            int32_t query_min=axis==0?box.position[0]:axis==1?box.position[1]:box.position[2];
+            int32_t query_max=axis==0?box.angles[0]:axis==1?box.angles[1]:box.angles[2];
+            if (object_max<query_min || query_max<object_min) { *result=0;return 1; }
+        }
+        *result=1;return 1;
+    }
+    default:
+        (void)args;
+        return fail(script,"native variable not ported");
+    }
+}
+
 static int dispatch(uint8_t opcode, uint16_t *stack, size_t *size,
                      size_t capacity, void *userdata)
 {
@@ -229,7 +423,8 @@ static int dispatch(uint8_t opcode, uint16_t *stack, size_t *size,
     script->calls++;
     /* Every executed call records its real stack arguments, not guessed IDs
      * from linear disassembly. Unsupported calls leave the stack untouched. */
-    int ok=variable ? fail(script,"native variable not ported") : command(script,id,args,count-1);
+    uint16_t result=0;
+    int ok=variable ? native_variable(script,id,args,count-1,&result) : command(script,id,args,count-1);
     if (script->trace || !ok) {
         FILE *out=script->trace ? script->trace : stderr;
         fprintf(out,"%s: ABILENE tick=%u context=%u function=%u state=%u %s pc=+0x%x opcode=0x%02x %s=0x%x args=[",
@@ -243,6 +438,10 @@ static int dispatch(uint8_t opcode, uint16_t *stack, size_t *size,
     if (!ok) return 0;
     script->supported_calls++;
     *size-=count;
+    if (variable) {
+        if (*size>=capacity) return fail(script,"native variable result exceeds SOOL stack capacity");
+        stack[(*size)++]=result;
+    }
     (void)capacity;
     return 1;
 }
@@ -264,6 +463,7 @@ static void set_state(LL_LevelScriptContext *context, uint16_t state)
     context->state=state;context->body_done=0;
     context->vm.suspended=0;context->vm.return_depth=0;
     context->vm.stack_size=0;
+    context->vm.host_animation_wait=0;context->vm.host_yield=0;
     context->vm.state_flags&=(uint16_t)~2u;
     if (state==UINT16_MAX) { context->body_done=1;context->vm.state_flags|=2u; }
 }
@@ -296,6 +496,62 @@ void ll_level_script_update(LL_LevelScript *script)
 {
     if (!script || !script->loaded) return;
     script->updates++;
+    uint32_t clock=animation_clock(script->updates);
+    uint32_t elapsed_ms=(uint32_t)((uint64_t)script->updates*1000u/24u);
+    for (unsigned i=0;i<260;i++) {
+        LL_LevelScriptObject *object=&script->objects[i];
+        if (!object->present || !object->sprite_animation_active) continue;
+        uint64_t total=0;
+        for (unsigned f=object->sprite_animation_first;f<=object->sprite_animation_last;f++) {
+            LL_BibSpriteFrame record;
+            if (!ll_bib_get_sprite_frame(&script->bib,object->sprite_selector,f,&record)) { total=0;break; }
+            total+=record.duration;
+        }
+        if (!total) { object->sprite_animation_active=0;continue; }
+        uint64_t elapsed=(uint32_t)(elapsed_ms-object->sprite_animation_started_ms)%total;
+        unsigned frame=object->sprite_animation_first;
+        for (;frame<=object->sprite_animation_last;frame++) {
+            LL_BibSpriteFrame record;
+            if (!ll_bib_get_sprite_frame(&script->bib,object->sprite_selector,frame,&record)) break;
+            if (elapsed<record.duration) break;
+            elapsed-=record.duration;
+        }
+        if (frame>object->sprite_animation_last) frame=object->sprite_animation_first;
+        if (frame!=object->sprite_frame && !sprite_frame_apply(script,object,(uint16_t)frame))
+            object->sprite_animation_active=0;
+    }
+    for (unsigned i=0;i<260;i++) {
+        LL_LevelScriptObject *object=&script->objects[i];
+        if (!object->present || !object->animation_active) continue;
+        const LL_BibAnimationTable *table=ll_bib_get_animation_table(&script->bib,object->animation_selector);
+        if (!table || object->animation_last>=table->record_count) continue;
+        uint64_t total=0,elapsed=(uint32_t)(clock-object->animation_started);
+        for (unsigned frame=object->animation_first;frame<=object->animation_last;frame++)
+            total+=(uint64_t)table->records[frame].sample_count*32u;
+        if (!total) continue;
+        if (object->animation_once) { if (elapsed>=total) elapsed=total-1u; }
+        else elapsed%=total;
+        unsigned frame=object->animation_first;
+        while (frame<object->animation_last) {
+            uint64_t duration=(uint64_t)table->records[frame].sample_count*32u;
+            if (elapsed<duration) break;
+            elapsed-=duration;frame++;
+        }
+        object->animation_frame=(uint16_t)frame;
+        uint16_t owner=object->animation_callback_owner;
+        if (owner && owner<=script->program.function_count && object->animation_once) {
+            uint64_t completion=0;
+            unsigned end=object->animation_last>object->animation_first ? object->animation_last-1u : object->animation_last;
+            for (unsigned f=object->animation_first;f<=end;f++)
+                completion+=(uint64_t)table->records[f].sample_count*32u;
+            if ((uint32_t)(clock-object->animation_started)>=completion) {
+                script->contexts[owner-1u].vm.host_animation_wait=0;
+                object->animation_callback_owner=0;
+                if (object->animation_selector==table->selector && object->animation_last+1u<table->record_count)
+                    object->animation_last=(uint16_t)(table->record_count-1u);
+            }
+        }
+    }
     /* FUN_004219b0: pending states are applied at the next engine iteration,
      * then bodies, then separate conditions. No unbounded startup chaining. */
     for (unsigned i=0;i<script->program.function_count;i++) {
@@ -321,6 +577,7 @@ void ll_level_script_update(LL_LevelScript *script)
             LL_LevelScriptContext *context=&script->contexts[i];
             const LL_SoolFunction *fn=&script->program.functions[i];
             if (context->blocked || (context->vm.state_flags&1u)) continue;
+            if (!phase && context->vm.host_animation_wait) continue;
             if ((!phase && context->body_done) || (phase && fn->conditions_start==UINT16_MAX)) continue;
             script->in_conditions=(int)phase;script->dispatch_context=(uint16_t)i;
             LL_SoolVM *vm=&context->vm;

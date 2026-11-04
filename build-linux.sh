@@ -77,12 +77,12 @@ echo "Built BIB pose test: $BIB_POSE_TEST_OUTPUT"
 
 "$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror -I"$ROOT/src/linux" \
   "$ROOT/src/linux/abilene_trace.c" "$ROOT/src/linux/level_script.c" \
-  "$ROOT/src/linux/sool.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/native_camera.c" \
+  "$ROOT/src/linux/sool.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/biz.c" "$ROOT/src/linux/native_camera.c" \
   -o "$ROOT/build/linux/abilene-trace" -lm
 echo "Built original-script tracer: $ROOT/build/linux/abilene-trace"
 "$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror -I"$ROOT/src/linux" \
   "$ROOT/src/linux/level_script_test.c" "$ROOT/src/linux/level_script.c" \
-  "$ROOT/src/linux/sool.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/native_camera.c" \
+  "$ROOT/src/linux/sool.c" "$ROOT/src/linux/bib.c" "$ROOT/src/linux/biz.c" "$ROOT/src/linux/native_camera.c" \
   -o "$ROOT/build/linux/level-script-test" -lm
 "$ROOT/build/linux/level-script-test"
 "$CC" -std=c11 -Wall -Wextra -Wpedantic -Werror \

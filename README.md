@@ -87,17 +87,17 @@ dépend pas.
 
 Les fichiers ne sont jamais modifiés ; toutes les sorties générées vont dans `build/`.
 
-Le véritable `ABILENE/abilene.cod` s'exécute maintenant lorsque le menu SOOL
-demande l'état 2 via sa commande `0x12`. Le port initialise les paramètres
-récupérés et enregistre les modèles/poses reconnus. Les commandes et variables
-manquantes arrêtent explicitement leur contexte avec une trace ; le niveau
-ne possède pas encore de gameplay natif fonctionnel. Le prototype avec joueur
-et pièces procéduraux n'est plus lancé par ce chemin.
+Le véritable `ABILENE/abilene.cod` s'exécute lorsque le menu SOOL demande
+l'état 2 via sa commande `0x12`. Le runtime conserve les paramètres, modèles,
+sprites BIB/BIZ et attentes d'animation portés. La trace actuelle reconnaît
+469 appels sur 24 ticks et laisse 87 contextes arrêtés ; le gameplay natif
+reste incomplet. Les appels manquants arrêtent leur contexte avec une trace.
+Le prototype avec joueur et pièces procéduraux n'est plus lancé par ce chemin.
 
 Pour tracer le script sans fenêtre ni SDL :
 
 ```bash
-./build/linux/abilene-trace /chemin/ABILENE/abilene.cod /chemin/ABILENE/abilene.bib 24
+./build/linux/abilene-trace /chemin/ABILENE/abilene.cod /chemin/ABILENE/abilene.bib /chemin/ABILENE/abilene.biz 24
 ```
 
 Le code de sortie `3` signifie que des contextes attendent des fonctions

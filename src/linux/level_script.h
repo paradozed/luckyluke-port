@@ -3,6 +3,7 @@
 
 #include "sool.h"
 #include "bib.h"
+#include "biz.h"
 #include <stdio.h>
 
 typedef struct {
@@ -20,9 +21,13 @@ typedef struct {
 typedef struct {
     unsigned initialized, callback_capacity;
     uint8_t projection_mode, object_mode, camera_lock;
+    uint32_t native_flags;
+    uint8_t level_event_latch;
     uint32_t projection, reciprocal_projection, depth;
     int16_t world_cell, camera_mode, camera_speed;
     uint16_t camera_word, camera_limit, player_word;
+    uint16_t native_word_44;
+    uint16_t object_registry[256];
     int32_t camera_bounds[4];
     unsigned path_capacity, pose_capacity, pose_count;
     uint16_t pose_groups[10];
@@ -32,10 +37,21 @@ typedef struct {
     int present, cloned;
     uint32_t model_index;
     uint16_t wrapper_flags, motion_word;
-    uint8_t visible, update_enabled, reduced, kind;
+    uint8_t visible, update_enabled, reduced, kind, callback_kind;
     int32_t motion[3];
     int32_t *bounds;
     int32_t private_bounds[6];
+    uint16_t sprite_selector, biz_object, biz_sprite, sprite_frame;
+    int16_t sprite_scale, sprite_offset[2];
+    uint16_t sprite_width, sprite_height;
+    uint16_t native_wrapper_word;
+    uint16_t animation_selector, animation_first, animation_last, animation_frame;
+    uint16_t animation_callback_owner;
+    uint32_t animation_started;
+    uint8_t animation_active, animation_once;
+    uint8_t sprite_animation_active;
+    uint16_t sprite_animation_first, sprite_animation_last;
+    uint32_t sprite_animation_started_ms;
     LL_BibScenePose *pose; /* shared descriptor for0x65, private copy for0x68 */
     LL_BibScenePose private_pose;
 } LL_LevelScriptObject;
@@ -43,7 +59,8 @@ typedef struct {
 typedef struct {
     LL_SoolProgram program;
     LL_BibFile bib;
-    unsigned char *code_data, *bib_data;
+    LL_BizFile biz;
+    unsigned char *code_data, *bib_data, *biz_data;
     LL_LevelScriptContext *contexts;
     LL_SoolVM *condition_vm;
     LL_LevelNativeSetup native;
@@ -65,6 +82,9 @@ typedef struct {
 int ll_level_script_open(LL_LevelScript *script,
                           const unsigned char *code, size_t code_size,
                           const unsigned char *bib, size_t bib_size, FILE *trace);
+/* Attach an owned, bounds-checked level BIZ resource table before updates. */
+int ll_level_script_set_biz(LL_LevelScript *script,
+                            const unsigned char *biz, size_t biz_size);
 void ll_level_script_close(LL_LevelScript *script);
 /* One native engine iteration (24 Hz). Blocked contexts stay quarantined;
  * unrelated contexts continue, preserving explicit diagnostics and VM PCs. */

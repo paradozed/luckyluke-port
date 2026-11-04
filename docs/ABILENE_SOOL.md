@@ -1,34 +1,38 @@
-# Abilene SOOL: first native execution stage
+# Abilene SOOL: native execution progress
 
 ## Scope and observed result
 
-The native runtime now loads the original `ABILENE/abilene.cod`, retains its
-contexts and executes its bytecode through `sool.c`. It uses a separate,
-owned copy of `abilene.bib`; it neither mutates original files nor reuses the
-experimental CRC3 `ll_cod_*` parser. The scene's BIZ renderer, player,
-collision, animation/movement callbacks and audio are not implemented here.
-Model registration is scene **data**, not proof that those objects update or
-render like the original game. Unsupported calls stop the affected context;
-they are never treated as successful no-ops or variables returning zero.
+The native runtime loads the original `ABILENE/abilene.cod`, retains its
+contexts and executes its bytecode through `sool.c`. It owns copies of the
+original BIB and BIZ resources; it neither mutates game files nor reuses the
+experimental CRC3 `ll_cod_*` parser. Static/model and sprite constructors now
+retain bounded scene records, and skeletal animation schedules frames and
+completion waits. They do not yet deform model vertices or draw level objects.
+Player control, collision callbacks, projectile logic and level audio remain
+incomplete. Unsupported calls stop the affected context; they are never
+treated as successful no-ops or variables returning zero.
 
-Against the installed original assets, 24 engine updates produce:
+Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-functions=118 condition_streams=13 virtual_tables=40 models=213
-calls=246 supported=130 blocked=116 objects=62 static_models=169
+24 updates:  calls=556 supported=469 blocked_contexts=87 objects=87 static_models=169
+240 updates: calls=995 supported=904 blocked_contexts=91 objects=87 static_models=169
+directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-These numbers describe this bounded startup run, not coverage of every command
-in the file. Two contexts finish their supported setup; 116 encounter missing
-native commands/variables. No complete gameplay simulation is claimed.
+The 24-update run recognizes 339 more host calls than the initial stage (130)
+and registers 25 additional objects. At 240 updates, animation callbacks let
+more bodies resume, so later failures become reachable and the distinct
+blocked-context count rises to92. These counts are not full-file handler
+coverage or proof of gameplay equivalence.
 
 ## Reproduction
 
 ```sh
 ./build-linux.sh
-./build/linux/abilene-trace /path/ABILENE/abilene.cod /path/ABILENE/abilene.bib 24
+./build/linux/abilene-trace /path/ABILENE/abilene.cod /path/ABILENE/abilene.bib /path/ABILENE/abilene.biz 24
 ```
 
 The tool needs a C compiler at build time, but no display or SDL at runtime.
@@ -38,8 +42,10 @@ variable ID, and real arguments from the operand stack. IDs are not inferred
 from filenames or a linear scan. The summary preserves the first failure per
 context. Exit3 means missing handlers, exit2 invalid input/arguments, exit0 no
 reported blocker during the requested updates. Updates are bounded1..10000;
-inputs are limited to64 MiB each. Callers must not equate exit0 with complete
-gameplay or completion of a script that can intentionally keep running.
+inputs are limited to64 MiB each. BIZ is optional; supply it after the update
+count or before the count to enable checked sprite constructors. Callers must
+not equate exit0 with complete gameplay or completion of a script that can
+intentionally keep running.
 
 In the game, `LL_TRACE_LEVEL_SOOL=1` includes supported calls on stderr;
 blocking calls always appear. Select JEU/GAME with Enter. The original menu
@@ -100,20 +106,29 @@ Static geometry stays immutable. Cloned instances share immutable geometry
 but own their mutable root poses, so moving a clone cannot overwrite its source.
 Further descriptor fields are not accepted until their handlers are ported.
 
+Follow-on handlers now cover `0x6e/0x71` sprite wrapper setup from BIB frame
+zero and validated BIZ records; `0x45` wrapper registry slots; `0x5b` and
+variable `0x38` shared event flags; command/variable `0x2a`; variable `0x44`;
+and variable `0x26` signed inclusive AABB overlap. Command `0x6b` advances
+bounded BIB sprite-frame/BIZ object metadata. Commands `0x0b/0x14/0x1b`
+schedule bounded model animation ranges on the native 60 Hz clock, yield waiting contexts, advance
+frame metadata and resume owners through completion callbacks. Nonzero loop
+root displacement is rejected. Pose interpolation, transition blending,
+skeletal vertex application and sprite rendering remain unimplemented;
+bounded BIB sprite sequences update metadata but are not drawn.
+
 ## Next native work, from actual blocking calls
 
 | Blocking call | Contexts in this run | Native entry / next dependency |
 |---|---:|---|
-| command0a | 31 | 418e00/418da0: animation-table preload and expanded frame context |
-| command6e | 20 | 418350: sprite/wrapper constructor, distinct from a model |
-| command16 | 12 | 410310: per-object behavior flags |
-| command39 | 11 | 4121d0: two-lane scene controller |
-| command71 | 5 | BIZ sprite construction and rendering |
-| command96 | 5 | 41b970: gameplay behavior construction |
-| command32 | 1 | 411800: native player/input/HUD controller |
-| command66 | 1 | 418920: main player constructor |
-| commandc8 | 1 | 4172b0/41eff0: level audio initialization path |
-| other commands/variables | 29 | Exact first call, arguments and offsets retained in the trace |
+| commandf5 | 19 | 4165e0: collision-link slots and callback dispatch |
+| command39 | 11 | 4121d0: orbital sprite group and native update/draw callbacks |
+| variable26 | 11 | 40aca0: model/group AABB checks; calls currently depend on player instance4 |
+| variable66 | 8 | Player state query; blocked until command66 creates the player |
+| variableb | 7 | 408c70: native subtractive RNG state |
+| command96 / variable17 | 5 / 5 | 41b970 pose-driven sprite groups / 409500 two-instance position comparison |
+| variable36/64/39/99, command72 | 3/3/2/2/2 | Event, collision/projectile, and model callback state |
+| other commands/variables | 9 | Player constructor, level audio, camera/player callbacks and object setup |
 
 The ordering is a practical dependency guide, not a claim that implementing
 only these calls will complete the level. Later calls remain unreachable until
@@ -127,11 +142,12 @@ Synthetic tests cover owned inputs, next-function/trailing-table bounds,
 condition branches outside state code, separate body continuation/stack,
 condition-only startup, cross-context writes, next-tick state requests,
 immediate self-transition yields, exact negative clamp behavior and one-time
-quarantine with the unsupported call's stack preserved. The real asset tracer
-also verifies the observed startup values and registrations above. Sanitizer
-checks use ASan/UBSan; LSan is disabled because ptrace supervision prevents it
-from running in this environment. These tests do not establish native visual,
-physics or audio equivalence.
+quarantine with the unsupported call's stack preserved, plus native variable
+return-stack behavior and shared-flag side effects. The real asset tracer also
+verifies the observed startup values and registrations above. A 240-update
+original COD/BIB/BIZ run passed ASan/UBSan (LSan disabled because ptrace
+supervision prevents LSan in this environment). These tests do not establish
+native visual, physics or audio equivalence.
 
 Xvfb checks also cover JEU -> Abilene -> Escape -> menu -> Abilene, including
 closing/reopening the menu's SDL audio device with the dummy audio driver.

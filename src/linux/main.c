@@ -227,9 +227,18 @@ static int load_abilene_assets(void)
                 fprintf(stderr,"ERROR: cannot load original Abilene SOOL/BIB: %s\n",
                     bib?abilene_script.error:"missing ABILENE/abilene.bib");
             } else {
-                ll_level_script_update(&abilene_script);
-                ll_level_script_report(&abilene_script,stderr);
-                abilene_script_tick=(uint32_t)((uint64_t)SDL_GetTicks()*24u/1000u);
+                size_t biz_size=0;
+                unsigned char *biz=read_cd_file("ABILENE/abilene.biz",&biz_size);
+                if (!biz || !ll_level_script_set_biz(&abilene_script,biz,biz_size)) {
+                    fprintf(stderr,"ERROR: cannot attach original Abilene BIZ: %s\n",
+                        biz?abilene_script.error:"missing ABILENE/abilene.biz");
+                    ll_level_script_close(&abilene_script);
+                } else {
+                    ll_level_script_update(&abilene_script);
+                    ll_level_script_report(&abilene_script,stderr);
+                    abilene_script_tick=(uint32_t)((uint64_t)SDL_GetTicks()*24u/1000u);
+                }
+                free(biz);
             }
             free(bib);
         }

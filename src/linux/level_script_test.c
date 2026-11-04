@@ -65,6 +65,20 @@ static void run_tests(void)
     assert(script.native.player_word==7 && script.blocked_count==0);
     ll_level_script_close(&script);
 
+    /* Variable host calls replace their identifier/arguments with the native
+     * return word. FUN_0040bdc0 observes the command-controlled global flag. */
+    const unsigned char variable_flags[]={
+        5,0x38,0,0x50,5,0x58,0,0x3d,
+        5,0,0,5,0x5b,0,0x3d,
+        5,0x38,0,0x50,5,0x58,0,0x3d,0
+    };
+    size=fixture(data,variable_flags,sizeof(variable_flags),end,sizeof(end),NULL,0);
+    assert(ll_level_script_open(&script,data,size,NULL,0,trace));
+    ll_level_script_update(&script);
+    assert(script.native.player_word==1 && script.supported_calls==5 && !script.blocked_count);
+    assert(script.native.native_flags==5);
+    ll_level_script_close(&script);
+
     /* Quarantine unknown command, preserving stack and exact fault offset;
      * do not execute the following setter, retry, or stop unrelated contexts. */
     const unsigned char unknown[]={5,0x34,0x12,0x3c,5,2,0,5,0x58,0,0x3d,0};
