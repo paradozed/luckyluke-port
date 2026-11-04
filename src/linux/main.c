@@ -17,6 +17,7 @@
 #include "sool.h"
 #include "audio_mix.h"
 #include "native_camera.h"
+#include "native_rng.h"
 #include "level_script.h"
 
 /* All scene/UI math uses the original 640x480 display-list surface.
@@ -404,29 +405,7 @@ static void menu_scene_register_biz(uint16_t instance, uint16_t selector,
  * Unsigned arithmetic explicitly preserves the original 32-bit wraparound. */
 static uint16_t menu_random_word(void)
 {
-    static uint32_t words[55];
-    static unsigned first, second;
-    static int initialized;
-    if (!initialized) {
-        uint32_t seed = 0x09a4ec86u, next = 1;
-        words[54] = seed;
-        for (unsigned i = 0; i < 54; i++) {
-            unsigned index = (i * 21u) % 55u;
-            words[index] = next;
-            next = seed - next;
-            seed = words[index];
-        }
-        for (unsigned pass = 0; pass < 4; pass++)
-            for (unsigned i = 0; i < 55; i++)
-                words[i] -= words[(i + 31u) % 55u];
-        first = 0;
-        second = 31;
-        initialized = 1;
-    }
-    first = (first + 1u) % 55u;
-    second = (second + 1u) % 55u;
-    words[first] -= words[second];
-    return (uint16_t)(words[first] % 0x7fffu);
+    return ll_native_rng_word();
 }
 
 typedef struct {

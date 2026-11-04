@@ -15,15 +15,15 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=556 supported=469 blocked_contexts=87 objects=87 static_models=169
-240 updates: calls=995 supported=904 blocked_contexts=91 objects=87 static_models=169
+24 updates:  calls=807 supported=736 blocked_contexts=71 objects=88 static_models=169
+240 updates: calls=3480 supported=3402 blocked_contexts=78 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-The 24-update run recognizes 339 more host calls than the initial stage (130)
-and registers 25 additional objects. At 240 updates, animation callbacks let
+The 24-update run recognizes 606 more host calls than the initial stage (130)
+and registers 26 additional objects. At 240 updates, animation callbacks let
 more bodies resume, so later failures become reachable and the distinct
 blocked-context count rises to92. These counts are not full-file handler
 coverage or proof of gameplay equivalence.
@@ -108,12 +108,15 @@ Further descriptor fields are not accepted until their handlers are ported.
 
 Follow-on handlers now cover `0x6e/0x71` sprite wrapper setup from BIB frame
 zero and validated BIZ records; `0x45` wrapper registry slots; `0x5b` and
-variable `0x38` shared event flags; command/variable `0x2a`; variable `0x44`;
-and variable `0x26` signed inclusive AABB overlap. Command `0x6b` advances
-bounded BIB sprite-frame/BIZ object metadata. Commands `0x0b/0x14/0x1b`
-schedule bounded model animation ranges on the native 60 Hz clock, yield waiting contexts, advance
-frame metadata and resume owners through completion callbacks. Nonzero loop
-root displacement is rejected. Pose interpolation, transition blending,
+variable `0x38` shared event flags; command/variable `0x2a`; variables `0x0b`
+(shared subtractive RNG), `0x44`, and `0x26` signed inclusive AABB overlap.
+Command `0x66` registers Abilene's bounded `LUCKY3DK` player model root at
+instance4; movement and player update callbacks are still absent. Command
+`0x6b` advances bounded BIB sprite-frame/BIZ object metadata. Commands
+`0x0b/0x14/0x1b` schedule bounded model animation ranges on the native 60 Hz
+clock, yield waiting contexts, advance frame metadata and resume owners
+through completion callbacks. Nonzero loop root displacement is rejected.
+Pose interpolation, transition blending,
 skeletal vertex application and sprite rendering remain unimplemented;
 bounded BIB sprite sequences update metadata but are not drawn.
 
@@ -123,12 +126,11 @@ bounded BIB sprite sequences update metadata but are not drawn.
 |---|---:|---|
 | commandf5 | 19 | 4165e0: collision-link slots and callback dispatch |
 | command39 | 11 | 4121d0: orbital sprite group and native update/draw callbacks |
-| variable26 | 11 | 40aca0: model/group AABB checks; calls currently depend on player instance4 |
-| variable66 | 8 | Player state query; blocked until command66 creates the player |
-| variableb | 7 | 408c70: native subtractive RNG state |
+| variable66 | 8 | 40de60: overlap with sprite instances; their native bounds are not represented yet |
 | command96 / variable17 | 5 / 5 | 41b970 pose-driven sprite groups / 409500 two-instance position comparison |
 | variable36/64/39/99, command72 | 3/3/2/2/2 | Event, collision/projectile, and model callback state |
-| other commands/variables | 9 | Player constructor, level audio, camera/player callbacks and object setup |
+| variable7 | 2 | Native variable still depends on unported controller state |
+| other commands/variables | 9 | Level audio, camera/player callbacks and object setup |
 
 The ordering is a practical dependency guide, not a claim that implementing
 only these calls will complete the level. Later calls remain unreachable until

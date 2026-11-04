@@ -1,4 +1,5 @@
 #include "level_script.h"
+#include "native_rng.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -63,6 +64,18 @@ static void run_tests(void)
     ll_level_script_update(&script);
     assert(script.contexts[0].body_done && script.contexts[0].vm.stack_size==0);
     assert(script.native.player_word==7 && script.blocked_count==0);
+    ll_level_script_close(&script);
+
+    ll_native_rng_reset();
+    assert(ll_native_rng_word()==22539 && ll_native_rng_word()==1810 &&
+           ll_native_rng_word()==27890);
+    ll_native_rng_reset();
+    const unsigned char bounded_random[]={5,100,0,5,0x0b,0,0x51,
+        5,0x58,0,0x3d,0};
+    size=fixture(data,bounded_random,sizeof(bounded_random),end,sizeof(end),NULL,0);
+    assert(ll_level_script_open(&script,data,size,NULL,0,trace));
+    ll_level_script_update(&script);
+    assert(script.native.player_word==39 && script.supported_calls==2 && !script.blocked_count);
     ll_level_script_close(&script);
 
     /* Variable host calls replace their identifier/arguments with the native

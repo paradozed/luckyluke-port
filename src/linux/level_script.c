@@ -1,4 +1,5 @@
 #include "level_script.h"
+#include "native_rng.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -223,6 +224,28 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         object->sprite_animation_active=1;object->sprite_scale=(int16_t)args[2];
         return 1;
     }
+    case 0x66: { /* FUN_00418920: register the bounded player model/root record. */
+        ARITY(4);
+        if (args[3]!=0)
+            return fail(script,"only Abilene's original player variant0 is ported");
+        uint16_t instance=args[1];uint32_t offset;
+        if (!script->bib.valid || instance>=260 || script->objects[instance].present ||
+            !ll_bib_get_selector_offset(&script->bib,args[0],&offset))
+            return fail(script,"player constructor needs a free instance and valid BIB model selector");
+        unsigned model=0;
+        while (model<script->bib.model_count && script->bib.models[model].descriptor_offset!=offset) model++;
+        if (model==script->bib.model_count)
+            return fail(script,"player selector does not name a bounded model descriptor");
+        LL_LevelScriptObject *player=&script->objects[instance];
+        player->present=1;player->cloned=1;player->model_index=model;
+        player->kind=script->bib.models[model].type;player->player_control_index=args[2];
+        player->private_pose=script->model_poses[model];player->pose=&player->private_pose;
+        memcpy(player->private_bounds,script->model_bounds[model],sizeof(player->private_bounds));
+        player->bounds=player->private_bounds;player->wrapper_flags=3;
+        player->visible=1;player->update_enabled=1;
+        script->contexts[script->dispatch_context].instance=instance;
+        script->object_count++;return 1;
+    }
     case 0x6e: case 0x71: { /* FUN_00418350 / screen-sprite sibling constructor. */
         ARITY(3);
         uint16_t instance=args[0],selector=args[1];
@@ -370,6 +393,11 @@ static int native_variable(LL_LevelScript *script, uint16_t id,
 {
     LL_LevelNativeSetup *state=&script->native;
     switch (id) {
+    case 0x0b: /* FUN_00408c70: RNG word modulo signed SOOL bound. */
+        if (argc!=1) return fail(script,"wrong native variable arity");
+        if (!ll_native_rng_bounded((int16_t)args[0],result))
+            return fail(script,"native random variable divides by a zero bound");
+        return 1;
     case 0x38: /* FUN_0040bdc0 */
         if (argc) return fail(script,"wrong native variable arity");
         *result=(uint16_t)((state->native_flags&1u)!=0);

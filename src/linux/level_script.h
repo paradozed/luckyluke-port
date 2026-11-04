@@ -45,6 +45,7 @@ typedef struct {
     int16_t sprite_scale, sprite_offset[2];
     uint16_t sprite_width, sprite_height;
     uint16_t native_wrapper_word;
+    uint16_t player_control_index;
     uint16_t animation_selector, animation_first, animation_last, animation_frame;
     uint16_t animation_callback_owner;
     uint32_t animation_started;
