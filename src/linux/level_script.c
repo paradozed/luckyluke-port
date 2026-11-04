@@ -270,6 +270,20 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             group->center[axis]=(int32_t)(int16_t)args[5u+axis]*100;
         return 1;
     }
+    case 0x4e: { /* FUN_00413eb0: set the orbital wrapper's native byte at+2. */
+        ARITY(1);
+        LL_LevelOrbitalGroup *group=NULL;
+        for (unsigned i=0;i<260;i++) {
+            if (script->orbital_groups[i].present &&
+                script->orbital_groups[i].wrapper_instance==script->dispatch_context) {
+                group=&script->orbital_groups[i];break;
+            }
+        }
+        if (!group)
+            return fail(script,"orbital group byte setter requires its preceding 0x39 setup");
+        group->native_byte_2=(uint8_t)args[0];
+        return 1;
+    }
     case 0x53: { /* FUN_00412540: set four words on this orbital group. */
         ARITY(4);
         LL_LevelOrbitalGroup *group=NULL;
@@ -610,6 +624,17 @@ static int native_variable(LL_LevelScript *script, uint16_t id,
         if (!ll_native_rng_bounded((int16_t)args[0],result))
             return fail(script,"native random variable divides by a zero bound");
         return 1;
+    case 0x0e: { /* FUN_00408f40: select between X thresholds using a wrapper root. */
+        if (argc!=3 || args[2]>=script->program.function_count)
+            return fail(script,"orbital X selection requires two words and a target context");
+        uint16_t instance=script->contexts[args[2]].instance;
+        if (instance>=260 || !script->objects[instance].present ||
+            !script->objects[instance].pose)
+            return fail(script,"orbital X selection target has no bounded model root");
+        int32_t threshold=(int32_t)(int16_t)args[0]*100;
+        *result=script->objects[instance].pose->position[0]>threshold ? args[1] : args[0];
+        return 1;
+    }
     case 0x00: /* FUN_00407650: return the consumed SOOL word unchanged. */
         if (argc!=1) return fail(script,"wrong native variable arity");
         *result=args[0];return 1;

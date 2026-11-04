@@ -15,14 +15,14 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=1459 supported=1416 blocked_contexts=43 objects=88 static_models=169
-240 updates: calls=8935 supported=8884 blocked_contexts=51 objects=88 static_models=169
+24 updates:  calls=1467 supported=1427 blocked_contexts=40 objects=88 static_models=169
+240 updates: calls=8943 supported=8895 blocked_contexts=48 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-The 24-update run recognizes 1286 more host calls than the initial stage (130)
+The 24-update run recognizes 1297 more host calls than the initial stage (130)
 and registers 26 additional objects. At 240 updates, animation callbacks let
 more bodies resume, so later failures become reachable and the blocked-context
 count rises to51. These counts are not full-file handler
@@ -125,7 +125,11 @@ update/draw callbacks remain unimplemented, so no orbital sprites are built or
 rendered.
 Command `0x53` stores the four observed setup words in the matching orbital
 group, with context and arity checks. The group-specific variable `0x0e` and
-some subsequent wrapper setup commands still block those contexts.
+command `0x4e` are also ported: the variable selects between two X values using
+a checked wrapper root, while the command stores the native group byte at+2.
+The next group operation, variable `0x28`, scans generated member meshes for
+collision and remains blocked because those meshes and collision bounds are
+not yet built.
 `0x72` accepts the observed idempotent callback-enable requests for already
 registered model wrappers (instances28 and29); callback state transitions
 remain blocked because they register/reset native engine dispatch. Command
@@ -158,7 +162,7 @@ bounded BIB sprite sequences update metadata but are not drawn.
 
 | Blocking call | Contexts in this run | Native entry / next dependency |
 |---|---:|---|
-| variable0e / command4e | 8 / 3 | 408f40 group-position query / additional wrapper setup |
+| variable28 | 8 | 40ae50: orbital member collision scan; needs generated meshes and bounds |
 | variable17 / command96 | 7 / 5 | 409500 position comparison / 41b970 pose-driven sprite groups |
 | variable8e | 3 | Event and collision/projectile state |
 | variable39/99, command e8 | 2 / 2 / 1 | Model callback state and projectile trajectory setup |
