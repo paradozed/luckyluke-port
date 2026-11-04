@@ -79,6 +79,7 @@ static uint16_t menu_dispatch_context;
 static uint16_t menu_dispatch_function;
 static Uint8 menu_previous_keys[SDL_NUM_SCANCODES];
 static Uint8 menu_released_keys[SDL_NUM_SCANCODES];
+static Uint8 menu_pending_releases[SDL_NUM_SCANCODES];
 static uint16_t menu_actions, menu_pressed_actions;
 typedef struct {
     uint16_t instance_id;
@@ -1527,7 +1528,9 @@ static void update_menu_scripts(uint32_t tick)
     menu_actions = actions;
     for (size_t key = 0; key < SDL_NUM_SCANCODES; key++) {
         /* FUN_0043f590: (previous XOR current) AND previous, i.e. release. */
-        menu_released_keys[key] = menu_previous_keys[key] && !keys[key];
+        menu_released_keys[key] = menu_pending_releases[key] ||
+            (menu_previous_keys[key] && !keys[key]);
+        menu_pending_releases[key] = 0;
         menu_previous_keys[key] = keys[key];
     }
     for (uint16_t i = 0; i < menu_program.function_count; i++) {
@@ -2755,6 +2758,10 @@ int main(void)
                 }
                 break;
             case SDL_KEYUP:
+                if (game_state == 1 && menu_program_loaded &&
+                    event.key.keysym.scancode > SDL_SCANCODE_UNKNOWN &&
+                    event.key.keysym.scancode < SDL_NUM_SCANCODES)
+                    menu_pending_releases[event.key.keysym.scancode] = 1;
                 break;
             case SDL_MOUSEBUTTONDOWN:
             {
