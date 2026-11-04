@@ -30,6 +30,7 @@ typedef struct {
     uint8_t projection_mode, object_mode, camera_lock;
     uint32_t native_flags;
     uint8_t level_event_latch;
+    uint16_t collision_event_latch;
     uint32_t projection, reciprocal_projection, depth;
     int16_t world_cell, camera_mode, camera_speed;
     uint16_t camera_word, camera_limit, player_word;

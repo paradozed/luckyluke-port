@@ -185,6 +185,15 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         if (args[0]<260 && script->objects[args[0]].present)
             script->objects[args[0]].visible=args[1]!=0;
         return 1; /* FUN_004101e0 explicitly ignores absent targets. */
+    case 0x15: /* FUN_004195b0 -> FUN_004851b0: release active model animation data. */
+        ARITY(1);
+        if (object && object->animation_active) {
+            uint16_t owner=object->animation_callback_owner;
+            if (owner && owner<=script->program.function_count)
+                script->contexts[owner-1u].vm.host_animation_wait=0;
+            object->animation_active=0;object->animation_callback_owner=0;
+        }
+        return 1;
     case 0x32: /* FUN_00411800: register the scene-sprite callback manager. */
         ARITY(0);
         state->scene_sprite_capacity=16;
@@ -524,6 +533,16 @@ static int native_variable(LL_LevelScript *script, uint16_t id,
         if (!ll_native_rng_bounded((int16_t)args[0],result))
             return fail(script,"native random variable divides by a zero bound");
         return 1;
+    case 0x00: /* FUN_00407650: return the consumed SOOL word unchanged. */
+        if (argc!=1) return fail(script,"wrong native variable arity");
+        *result=args[0];return 1;
+    case 0x36: { /* FUN_0040ba60 consumes the collision event latch on match. */
+        if (argc!=1) return fail(script,"wrong native variable arity");
+        int matched=(int16_t)args[0]==(int16_t)state->collision_event_latch;
+        *result=(uint16_t)matched;
+        if (matched) state->collision_event_latch=0;
+        return 1;
+    }
     case 0x38: /* FUN_0040bdc0 */
         if (argc) return fail(script,"wrong native variable arity");
         *result=(uint16_t)((state->native_flags&1u)!=0);

@@ -15,17 +15,17 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=1103 supported=1052 blocked_contexts=51 objects=88 static_models=169
-240 updates: calls=5936 supported=5878 blocked_contexts=58 objects=88 static_models=169
+24 updates:  calls=1341 supported=1296 blocked_contexts=45 objects=88 static_models=169
+240 updates: calls=8434 supported=8382 blocked_contexts=52 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-The 24-update run recognizes 922 more host calls than the initial stage (130)
+The 24-update run recognizes 1166 more host calls than the initial stage (130)
 and registers 26 additional objects. At 240 updates, animation callbacks let
 more bodies resume, so later failures become reachable and the blocked-context
-count rises to58. These counts are not full-file handler
+count rises to52. These counts are not full-file handler
 coverage or proof of gameplay equivalence.
 
 ## Reproduction
@@ -112,6 +112,9 @@ variable `0x38` shared event flags; command/variable `0x2a`; variables `0x0b`
 (shared subtractive RNG), `0x44`, and `0x26` signed inclusive AABB overlap.
 Command `0x66` registers Abilene's bounded `LUCKY3DK` player model root at
 instance4; movement and player update callbacks are still absent. Command
+`0x15` releases the current model's active animation data. Variable `0x00`
+returns its input word; variable `0x36` compares and consumes the collision
+event latch, matching the boolean behavior of the related native handler.
 `0x72` accepts the observed idempotent callback-enable requests for already
 registered model wrappers (instances28 and29); callback state transitions
 remain blocked because they register/reset native engine dispatch. Command
@@ -145,12 +148,11 @@ bounded BIB sprite sequences update metadata but are not drawn.
 | Blocking call | Contexts in this run | Native entry / next dependency |
 |---|---:|---|
 | command39 | 11 | 4121d0: orbital sprite group and native update/draw callbacks |
-| variable36 | 7 | 40ba60: shared latch side effect has unclear native variable result |
 | variable17 / command96 | 6 / 5 | 409500 position comparison / 41b970 pose-driven sprite groups |
-| variable8e | 3 | Event and collision/projectile state |
+| variable8e / command7a | 3 / 3 | Event and skeletal animation root updates |
 | variable39/99, command e8 | 2 / 2 / 1 | Model callback state and projectile trajectory setup |
-| variable7 | 2 | Native variable still depends on unported controller state |
-| other calls | 13 | Level audio, camera/player callbacks and object setup |
+| variable7 / variablec | 2 / 2 | Native controller state and event query |
+| other calls | 9 | Level audio, camera/player callbacks and object setup |
 
 The ordering is a practical dependency guide, not a claim that implementing
 only these calls will complete the level. Later calls remain unreachable until

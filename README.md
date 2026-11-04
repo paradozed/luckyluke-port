@@ -90,7 +90,7 @@ Les fichiers ne sont jamais modifiés ; toutes les sorties générées vont dans
 Le véritable `ABILENE/abilene.cod` s'exécute lorsque le menu SOOL demande
 l'état 2 via sa commande `0x12`. Le runtime conserve les paramètres, modèles,
 sprites BIB/BIZ, le modèle joueur et les attentes d'animation portés. La trace
-actuelle reconnaît 1052 appels sur 24 ticks et laisse 51 contextes arrêtés ; le gameplay natif
+actuelle reconnaît 1296 appels sur 24 ticks et laisse 45 contextes arrêtés ; le gameplay natif
 reste incomplet. Les appels manquants arrêtent leur contexte avec une trace.
 Le prototype avec joueur et pièces procéduraux n'est plus lancé par ce chemin.
 
