@@ -153,6 +153,19 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         if (args[0]<260 && script->objects[args[0]].present)
             script->objects[args[0]].visible=args[1]!=0;
         return 1; /* FUN_004101e0 explicitly ignores absent targets. */
+    case 0x72: { /* FUN_00418620: toggle a registered wrapper callback. */
+        ARITY(2);
+        if (args[0]>=260 || !script->objects[args[0]].present)
+            return fail(script,"callback toggle requires a registered wrapper");
+        LL_LevelScriptObject *target=&script->objects[args[0]];
+        int enabled=args[1]!=0;
+        /* Constructors set the native callback-active byte to1. The observed
+         * Abilene calls only request this already-active state; transitions
+         * also reset/register native engine callbacks and are not yet ported. */
+        if (target->native_callback_enabled!=(uint8_t)enabled)
+            return fail(script,"callback state transition requires native wrapper dispatch");
+        return 1;
+    }
     case 0x5b: /* FUN_00414240 */
         ARITY(1);
         if (!args[0]) state->native_flags|=1u;
@@ -242,7 +255,7 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         player->private_pose=script->model_poses[model];player->pose=&player->private_pose;
         memcpy(player->private_bounds,script->model_bounds[model],sizeof(player->private_bounds));
         player->bounds=player->private_bounds;player->wrapper_flags=3;
-        player->visible=1;player->update_enabled=1;
+        player->visible=1;player->update_enabled=1;player->native_callback_enabled=1;
         script->contexts[script->dispatch_context].instance=instance;
         script->object_count++;return 1;
     }
@@ -262,6 +275,7 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         LL_LevelScriptObject *created=&script->objects[instance];
         created->present=1;created->kind=id==0x6e?5:7;created->visible=(uint8_t)(id==0x71);
         created->update_enabled=(uint8_t)(id==0x6e);created->wrapper_flags=1;
+        created->native_callback_enabled=1;
         created->pose=&created->private_pose;
         created->sprite_selector=selector;created->biz_object=frame.object_index;
         created->biz_sprite=object_record.sprite_index;created->sprite_scale=(int16_t)args[2];
@@ -317,6 +331,7 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         memcpy(object->private_bounds,script->model_bounds[model],sizeof(object->private_bounds));
         object->bounds=object->cloned ? object->private_bounds : script->model_bounds[model];
         object->wrapper_flags=1;object->visible=1;object->update_enabled=1;
+        object->native_callback_enabled=1;
         script->contexts[script->dispatch_context].instance=args[1];
         script->object_count++;return 1;
     }

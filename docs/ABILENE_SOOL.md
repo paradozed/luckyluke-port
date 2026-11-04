@@ -15,8 +15,8 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=807 supported=736 blocked_contexts=71 objects=88 static_models=169
-240 updates: calls=3480 supported=3402 blocked_contexts=78 objects=88 static_models=169
+24 updates:  calls=807 supported=738 blocked_contexts=69 objects=88 static_models=169
+240 updates: calls=3480 supported=3404 blocked_contexts=76 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
@@ -112,6 +112,9 @@ variable `0x38` shared event flags; command/variable `0x2a`; variables `0x0b`
 (shared subtractive RNG), `0x44`, and `0x26` signed inclusive AABB overlap.
 Command `0x66` registers Abilene's bounded `LUCKY3DK` player model root at
 instance4; movement and player update callbacks are still absent. Command
+`0x72` accepts the observed idempotent callback-enable requests for already
+registered model wrappers (instances28 and29); callback state transitions
+remain blocked because they register/reset native engine dispatch. Command
 `0x6b` advances bounded BIB sprite-frame/BIZ object metadata. Commands
 `0x0b/0x14/0x1b` schedule bounded model animation ranges on the native 60 Hz
 clock, yield waiting contexts, advance frame metadata and resume owners
@@ -128,7 +131,7 @@ bounded BIB sprite sequences update metadata but are not drawn.
 | command39 | 11 | 4121d0: orbital sprite group and native update/draw callbacks |
 | variable66 | 8 | 40de60: overlap with sprite instances; their native bounds are not represented yet |
 | command96 / variable17 | 5 / 5 | 41b970 pose-driven sprite groups / 409500 two-instance position comparison |
-| variable36/64/39/99, command72 | 3/3/2/2/2 | Event, collision/projectile, and model callback state |
+| variable36/64/39/99 | 3/3/2/2 | Event, collision/projectile, and model callback state |
 | variable7 | 2 | Native variable still depends on unported controller state |
 | other commands/variables | 9 | Level audio, camera/player callbacks and object setup |
 

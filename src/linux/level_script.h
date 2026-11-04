@@ -38,6 +38,7 @@ typedef struct {
     uint32_t model_index;
     uint16_t wrapper_flags, motion_word;
     uint8_t visible, update_enabled, reduced, kind, callback_kind;
+    uint8_t native_callback_enabled;
     int32_t motion[3];
     int32_t *bounds;
     int32_t private_bounds[6];
