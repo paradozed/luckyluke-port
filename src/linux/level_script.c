@@ -446,6 +446,41 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
 #undef ARITY
 }
 
+static int object_aabb(LL_LevelScript *script, const LL_LevelScriptObject *object,
+                      uint16_t mode, int32_t bounds[6])
+{
+    if (!object || !object->present || !object->pose) return 0;
+    if (mode==0) {
+        if (!object->bounds) return 0;
+        for (unsigned i=0;i<6;i++)
+            bounds[i]=(int32_t)((uint32_t)object->bounds[i]+
+                                (uint32_t)object->pose->position[i%3]);
+        return 1;
+    }
+    if (mode!=1 || object->kind==5 || object->kind==7 ||
+        object->model_index>=script->bib.model_count) return 0;
+    const LL_Bib3dxModel *model=ll_bib_get_model(&script->bib,object->model_index);
+    if (!model || model->geometry_model_index>=script->bib.model_count) return 0;
+    const LL_Bib3dxModel *geometry=ll_bib_get_model(&script->bib,model->geometry_model_index);
+    if (!geometry || !geometry->vertices || geometry->vertex_count<=4) return 0;
+    for (unsigned axis=0;axis<3;axis++) {
+        bounds[axis]=INT32_MAX;bounds[axis+3]=INT32_MIN;
+    }
+    /* FUN_0047fbe0 scans source vertices [2, count-2), then FUN_0040d950
+     * translates the resulting local AABB by the wrapper root. */
+    for (uint32_t i=2;i<geometry->vertex_count-2;i++)
+        for (unsigned axis=0;axis<3;axis++) {
+            int32_t value=geometry->vertices[i].position[axis];
+            if (value<bounds[axis]) bounds[axis]=value;
+            if (value>bounds[axis+3]) bounds[axis+3]=value;
+        }
+    for (unsigned axis=0;axis<3;axis++) {
+        bounds[axis]=(int32_t)((uint32_t)bounds[axis]+(uint32_t)object->pose->position[axis]);
+        bounds[axis+3]=(int32_t)((uint32_t)bounds[axis+3]+(uint32_t)object->pose->position[axis]);
+    }
+    return 1;
+}
+
 static int native_variable(LL_LevelScript *script, uint16_t id,
                            const uint16_t *args, size_t argc, uint16_t *result)
 {
@@ -465,6 +500,22 @@ static int native_variable(LL_LevelScript *script, uint16_t id,
         if (argc) return fail(script,"wrong native variable arity");
         *result=state->native_word_44?state->native_word_44:3;
         return 1;
+    case 0x64: { /* FUN_0040ddb0 -> FUN_0040da10/FUN_0040d810: AABB overlap. */
+        if (argc!=4 || args[0]>=script->program.function_count ||
+            args[2]>=script->program.function_count)
+            return fail(script,"AABB overlap requires two registered wrapper contexts and modes");
+        uint16_t first=script->contexts[args[0]].instance;
+        uint16_t second=script->contexts[args[2]].instance;
+        if (first>=260 || second>=260) return fail(script,"AABB overlap wrapper has no live instance");
+        int32_t a[6],b[6];
+        if (!object_aabb(script,&script->objects[first],args[1],a) ||
+            !object_aabb(script,&script->objects[second],args[3],b))
+            return fail(script,"AABB overlap mode requires bounded model geometry or descriptor bounds");
+        *result=1;
+        for (unsigned axis=0;axis<3;axis++)
+            if (a[axis+3]<b[axis] || b[axis+3]<a[axis]) { *result=0;break; }
+        return 1;
+    }
     case 0x2a: /* FUN_0040b3d0 */
         if (argc) return fail(script,"wrong native variable arity");
         *result=state->level_event_latch;return 1;

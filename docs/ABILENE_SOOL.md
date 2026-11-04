@@ -15,14 +15,14 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=887 supported=827 blocked_contexts=60 objects=88 static_models=169
-240 updates: calls=3560 supported=3493 blocked_contexts=67 objects=88 static_models=169
+24 updates:  calls=911 supported=852 blocked_contexts=59 objects=88 static_models=169
+240 updates: calls=3800 supported=3734 blocked_contexts=66 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-The 24-update run recognizes 697 more host calls than the initial stage (130)
+The 24-update run recognizes 722 more host calls than the initial stage (130)
 and registers 26 additional objects. At 240 updates, animation callbacks let
 more bodies resume, so later failures become reachable and the blocked-context
 count rises to67. These counts are not full-file handler
@@ -119,6 +119,9 @@ remain blocked because they register/reset native engine dispatch. Command
 including target context, callback mode and recognized flags. Its collision
 callbacks are not dispatched yet, so contact response and gameplay effects
 remain absent.
+Variable `0x64` compares two wrapper bounds with inclusive AABB semantics;
+mode0 uses descriptor bounds and mode1 scans the original BIB geometry vertex
+range used by the native handler, then translates by each wrapper root.
 `0x11e` resolves a bounded BIB pose and retains its three position coordinates
 as the native camera target; a failed native lookup preserves the previous
 target. The camera-follow callback that consumes this target is still absent.
@@ -141,10 +144,10 @@ bounded BIB sprite sequences update metadata but are not drawn.
 | variable66 | 8 | 40de60: overlap with sprite instances; their native bounds are not represented yet |
 | variable36 | 7 | 40ba60: shared latch side effect has unclear native variable result |
 | variable17 / command96 | 6 / 5 | 409500 position comparison / 41b970 pose-driven sprite groups |
-| variable8e / variable64 | 3 / 3 | Event and collision/projectile state |
+| variable8e | 3 | Event and collision/projectile state |
 | variable39/99, command e8 | 2 / 2 / 1 | Model callback state and projectile trajectory setup |
 | variable7 | 2 | Native variable still depends on unported controller state |
-| other calls | 10 | Level audio, camera/player callbacks and object setup |
+| other calls | 13 | Level audio, camera/player callbacks and object setup |
 
 The ordering is a practical dependency guide, not a claim that implementing
 only these calls will complete the level. Later calls remain unreachable until
