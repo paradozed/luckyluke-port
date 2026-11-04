@@ -29,6 +29,8 @@ typedef struct {
     uint16_t native_word_44;
     uint16_t object_registry[256];
     int32_t camera_bounds[4];
+    int32_t camera_target[3];
+    uint8_t camera_target_active;
     unsigned path_capacity, pose_capacity, pose_count;
     uint16_t pose_groups[10];
 } LL_LevelNativeSetup;

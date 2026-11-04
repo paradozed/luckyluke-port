@@ -166,6 +166,15 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             return fail(script,"callback state transition requires native wrapper dispatch");
         return 1;
     }
+    case 0x11e: { /* FUN_004156c0: select a BIB pose as the camera target. */
+        ARITY(2);
+        LL_BibScenePose target;
+        if (!ll_bib_get_scene_pose(&script->bib,args[0],args[1],&target))
+            return 1; /* Native lookup failure leaves the previous target intact. */
+        memcpy(state->camera_target,target.position,sizeof(state->camera_target));
+        state->camera_target_active=1;
+        return 1;
+    }
     case 0x5b: /* FUN_00414240 */
         ARITY(1);
         if (!args[0]) state->native_flags|=1u;
