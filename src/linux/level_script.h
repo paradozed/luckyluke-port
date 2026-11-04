@@ -27,7 +27,10 @@ typedef struct {
     int16_t world_cell, camera_mode, camera_speed;
     uint16_t camera_word, camera_limit, player_word;
     uint16_t native_word_44;
+    uint16_t scene_sprite_capacity;
     uint16_t object_registry[256];
+    uint16_t scene_sprite_slots[5];
+    uint8_t scene_sprite_manager_registered;
     int32_t camera_bounds[4];
     int32_t camera_target[3];
     uint8_t camera_target_active;

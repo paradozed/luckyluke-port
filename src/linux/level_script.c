@@ -153,6 +153,12 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         if (args[0]<260 && script->objects[args[0]].present)
             script->objects[args[0]].visible=args[1]!=0;
         return 1; /* FUN_004101e0 explicitly ignores absent targets. */
+    case 0x32: /* FUN_00411800: register the scene-sprite callback manager. */
+        ARITY(0);
+        state->scene_sprite_capacity=16;
+        memset(state->scene_sprite_slots,0,sizeof(state->scene_sprite_slots));
+        state->scene_sprite_manager_registered=1;
+        return 1;
     case 0x72: { /* FUN_00418620: toggle a registered wrapper callback. */
         ARITY(2);
         if (args[0]>=260 || !script->objects[args[0]].present)

@@ -15,8 +15,8 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=833 supported=764 blocked_contexts=69 objects=88 static_models=169
-240 updates: calls=3506 supported=3430 blocked_contexts=76 objects=88 static_models=169
+24 updates:  calls=834 supported=766 blocked_contexts=68 objects=88 static_models=169
+240 updates: calls=3507 supported=3432 blocked_contexts=75 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
@@ -118,6 +118,9 @@ remain blocked because they register/reset native engine dispatch. Command
 `0x11e` resolves a bounded BIB pose and retains its three position coordinates
 as the native camera target; a failed native lookup preserves the previous
 target. The camera-follow callback that consumes this target is still absent.
+Command `0x32` retains the scene-sprite manager's capacity16 and clears its five
+native sprite slots; registration is modeled, while the manager's update/draw
+callback has not been ported.
 `0x6b` advances bounded BIB sprite-frame/BIZ object metadata. Commands
 `0x0b/0x14/0x1b` schedule bounded model animation ranges on the native 60 Hz
 clock, yield waiting contexts, advance frame metadata and resume owners
