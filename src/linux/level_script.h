@@ -30,6 +30,9 @@ typedef struct {
     uint8_t has_member_positions;
     int32_t member_positions[64][3];
     int32_t member_roots[64][3];
+    uint8_t has_sprite_bounds;
+    uint16_t biz_object, biz_sprite;
+    int32_t sprite_bounds[6];
 } LL_LevelOrbitalGroup;
 
 typedef struct {

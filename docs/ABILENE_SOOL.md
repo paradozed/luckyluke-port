@@ -2,6 +2,11 @@
 
 ## Sprite-group follow-up
 
+The `0x96` constructor now also requires a valid first BIB sprite frame and
+BIZ texture. It retains their resource IDs and local bounds using the existing
+world-sprite scale/clipping calculation. These are preparation data for member
+collision; variable `0x28` and its collision effects remain unsupported.
+
 Commands `0x96` and `0x97` now retain bounded BIB member origins and apply
 signed raw-unit offsets to separate root positions. Repeated translations
 always use the saved origins, matching `FUN_0041be30`; meshes, projection and

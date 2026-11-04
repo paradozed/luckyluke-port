@@ -257,6 +257,10 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             return fail(script,"sprite group position record is truncated or exceeds 64 members");
         if (!ll_bib_get_selector_offset(&script->bib,args[4],&descriptor))
             return fail(script,"sprite group resource selector is invalid");
+        LL_LevelScriptObject sprite={0};
+        sprite.kind=5;sprite.sprite_selector=args[4];sprite.sprite_scale=(int16_t)args[3];
+        if (!sprite_frame_apply(script,&sprite,0))
+            return fail(script,"sprite group needs a valid first BIB frame and BIZ texture");
         LL_LevelOrbitalGroup *group=&script->orbital_groups[args[2]];
         if (!group->present) script->orbital_group_count++;
         memset(group,0,sizeof(*group));
@@ -265,6 +269,9 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         group->model_selector=args[4];group->descriptor_offset=descriptor;
         group->member_count=(uint16_t)count;group->scale=(int16_t)args[3];
         group->member_parameter=args[5];group->has_member_positions=1;
+        group->has_sprite_bounds=1;group->biz_object=sprite.biz_object;
+        group->biz_sprite=sprite.biz_sprite;
+        memcpy(group->sprite_bounds,sprite.private_bounds,sizeof(group->sprite_bounds));
         for (unsigned member=0;member<count;member++)
             for (unsigned axis=0;axis<3;axis++) {
                 const unsigned char *p=record+4u+16u*member+4u*axis;
