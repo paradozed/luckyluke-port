@@ -22,10 +22,10 @@ projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-The 24-update run recognizes 606 more host calls than the initial stage (130)
+The 24-update run recognizes 697 more host calls than the initial stage (130)
 and registers 26 additional objects. At 240 updates, animation callbacks let
-more bodies resume, so later failures become reachable and the distinct
-blocked-context count rises to92. These counts are not full-file handler
+more bodies resume, so later failures become reachable and the blocked-context
+count rises to67. These counts are not full-file handler
 coverage or proof of gameplay equivalence.
 
 ## Reproduction
