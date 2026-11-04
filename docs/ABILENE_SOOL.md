@@ -15,17 +15,17 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=911 supported=852 blocked_contexts=59 objects=88 static_models=169
-240 updates: calls=3800 supported=3734 blocked_contexts=66 objects=88 static_models=169
+24 updates:  calls=1103 supported=1052 blocked_contexts=51 objects=88 static_models=169
+240 updates: calls=5936 supported=5878 blocked_contexts=58 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-The 24-update run recognizes 722 more host calls than the initial stage (130)
+The 24-update run recognizes 922 more host calls than the initial stage (130)
 and registers 26 additional objects. At 240 updates, animation callbacks let
 more bodies resume, so later failures become reachable and the blocked-context
-count rises to67. These counts are not full-file handler
+count rises to58. These counts are not full-file handler
 coverage or proof of gameplay equivalence.
 
 ## Reproduction
@@ -122,6 +122,10 @@ remain absent.
 Variable `0x64` compares two wrapper bounds with inclusive AABB semantics;
 mode0 uses descriptor bounds and mode1 scans the original BIB geometry vertex
 range used by the native handler, then translates by each wrapper root.
+World-sprite wrappers retain the clipped BIZ texture rectangle with the native
+scale and Abilene's 640/512 horizontal projection factor. Variable `0x66`
+compares these sprite bounds against a target wrapper using the same inclusive
+AABB test; unsupported sprite-wrapper modes still stop their context.
 `0x11e` resolves a bounded BIB pose and retains its three position coordinates
 as the native camera target; a failed native lookup preserves the previous
 target. The camera-follow callback that consumes this target is still absent.
@@ -141,7 +145,6 @@ bounded BIB sprite sequences update metadata but are not drawn.
 | Blocking call | Contexts in this run | Native entry / next dependency |
 |---|---:|---|
 | command39 | 11 | 4121d0: orbital sprite group and native update/draw callbacks |
-| variable66 | 8 | 40de60: overlap with sprite instances; their native bounds are not represented yet |
 | variable36 | 7 | 40ba60: shared latch side effect has unclear native variable result |
 | variable17 / command96 | 6 / 5 | 409500 position comparison / 41b970 pose-driven sprite groups |
 | variable8e | 3 | Event and collision/projectile state |

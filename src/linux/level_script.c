@@ -14,6 +14,37 @@ static uint32_t animation_clock(uint32_t update)
     return (uint32_t)(((uint64_t)update*60u/24u)*31u);
 }
 
+static int sprite_bounds_apply(LL_LevelScriptObject *object, const LL_BizSprite *sprite)
+{
+    if (!object || object->kind!=5 || !sprite) return 0;
+    int x=sprite->texture_x,y=sprite->texture_y;
+    uint8_t width=(uint8_t)((uint16_t)sprite->width_units*4u);
+    uint8_t height=(uint8_t)sprite->height;
+    if (!width) width=0xff;
+    if (!height) height=0xff;
+    if ((unsigned)sprite->texture_x+width>0xffu)
+        width=(uint8_t)(0xffu-sprite->texture_x);
+    if ((unsigned)sprite->texture_y+height>0xffu)
+        height=(uint8_t)(0xffu-sprite->texture_y);
+
+    /* FUN_00485e70 applies the object scale in 16-bit fields, then Abilene's
+     * game-state2 projection scales X by 640/512. Its sprite bounds store the
+     * min/max of the resulting rectangle coordinates in the third axis. */
+    int16_t sx=(int16_t)(uint16_t)(x*object->sprite_scale);
+    int16_t sy=(int16_t)(uint16_t)(y*object->sprite_scale);
+    int16_t sw=(int16_t)(uint16_t)((int)width*object->sprite_scale);
+    int16_t sh=(int16_t)(uint16_t)((int)height*object->sprite_scale);
+    sx=(int16_t)((uint32_t)((int32_t)sx*640)>>9);
+    sw=(int16_t)((uint32_t)((int32_t)sw*640)>>9);
+    int right=(int)sx+(int)sw,bottom=(int)sy+(int)sh;
+    object->private_bounds[0]=sx;object->private_bounds[1]=sy;
+    object->private_bounds[2]=sx<sy?sx:sy;
+    object->private_bounds[3]=right;object->private_bounds[4]=bottom;
+    object->private_bounds[5]=right>bottom?right:bottom;
+    object->bounds=object->private_bounds;
+    return 1;
+}
+
 static int sprite_frame_apply(LL_LevelScript *script, LL_LevelScriptObject *object,
                               uint16_t frame_index)
 {
@@ -26,6 +57,7 @@ static int sprite_frame_apply(LL_LevelScript *script, LL_LevelScriptObject *obje
     object->sprite_offset[1]=frame.offset_y;
     object->sprite_width=(uint16_t)((uint16_t)sprite.width_units*4u);
     object->sprite_height=(uint16_t)sprite.height;
+    if (object->kind==5) sprite_bounds_apply(object,&sprite);
     return 1;
 }
 
@@ -326,6 +358,7 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
         created->sprite_offset[1]=frame.offset_y;
         created->sprite_width=(uint16_t)((uint16_t)sprite_record.width_units*4u);
         created->sprite_height=(uint16_t)sprite_record.height;
+        if (created->kind==5) sprite_bounds_apply(created,&sprite_record);
         script->contexts[script->dispatch_context].instance=instance;
         script->object_count++;return 1;
     }
@@ -511,6 +544,21 @@ static int native_variable(LL_LevelScript *script, uint16_t id,
         if (!object_aabb(script,&script->objects[first],args[1],a) ||
             !object_aabb(script,&script->objects[second],args[3],b))
             return fail(script,"AABB overlap mode requires bounded model geometry or descriptor bounds");
+        *result=1;
+        for (unsigned axis=0;axis<3;axis++)
+            if (a[axis+3]<b[axis] || b[axis+3]<a[axis]) { *result=0;break; }
+        return 1;
+    }
+    case 0x66: { /* FUN_0040de60: current wrapper bounds versus a target wrapper. */
+        if (argc!=3 || args[1]>=script->program.function_count)
+            return fail(script,"sprite collision query requires a registered target context");
+        uint16_t first=script->contexts[script->dispatch_context].instance;
+        uint16_t second=script->contexts[args[1]].instance;
+        if (first>=260 || second>=260) return fail(script,"sprite collision wrapper has no live instance");
+        int32_t a[6],b[6];
+        if (!object_aabb(script,&script->objects[first],args[0],a) ||
+            !object_aabb(script,&script->objects[second],args[2],b))
+            return fail(script,"sprite collision mode requires bounded wrapper geometry");
         *result=1;
         for (unsigned axis=0;axis<3;axis++)
             if (a[axis+3]<b[axis] || b[axis+3]<a[axis]) { *result=0;break; }
