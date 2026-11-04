@@ -19,6 +19,15 @@ typedef struct {
 } LL_LevelSkeletalAttachment;
 
 typedef struct {
+    uint8_t present, callback_registered;
+    uint16_t wrapper_instance, model_index, model_selector;
+    uint16_t member_count, member_parameter, group_parameter, extra_parameter;
+    int16_t scale, angle_step;
+    int32_t center[3];
+    uint32_t descriptor_offset;
+} LL_LevelOrbitalGroup;
+
+typedef struct {
     LL_SoolVM vm;
     uint16_t state;
     uint16_t instance;
@@ -93,6 +102,8 @@ typedef struct {
     unsigned object_count, static_model_count;
     LL_LevelSkeletalAttachment skeletal_attachments[256];
     unsigned skeletal_attachment_count;
+    LL_LevelOrbitalGroup orbital_groups[260];
+    unsigned orbital_group_count;
     int grid_loaded;
     FILE *trace;
     uint32_t updates, calls, supported_calls, blocked_count;

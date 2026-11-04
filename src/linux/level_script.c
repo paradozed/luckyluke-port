@@ -241,6 +241,35 @@ static int command(LL_LevelScript *script, uint16_t id, const uint16_t *args, si
             return fail(script,"callback state transition requires native wrapper dispatch");
         return 1;
     }
+    case 0x39: { /* FUN_004121d0: configure an orbital sprite-group wrapper. */
+        ARITY(10);
+        if (!args[3] || args[3]>64 || args[9]>=260)
+            return fail(script,"orbital group needs 1..64 members and wrapper instance0..259");
+        uint32_t descriptor_offset;
+        if (!ll_bib_get_selector_offset(&script->bib,args[0],&descriptor_offset))
+            return fail(script,"orbital group selector is outside the bounded BIB selector table");
+        unsigned model=0;
+        while (model<script->bib.model_count &&
+               script->bib.models[model].descriptor_offset!=descriptor_offset) model++;
+        LL_LevelOrbitalGroup *group=&script->orbital_groups[args[9]];
+        if (!group->present) {
+            if (script->orbital_group_count>=260)
+                return fail(script,"orbital group registry is full");
+            script->orbital_group_count++;
+        }
+        memset(group,0,sizeof(*group));
+        group->present=1;group->callback_registered=1;
+        group->wrapper_instance=args[9];
+        group->model_index=(uint16_t)(model<script->bib.model_count?model:UINT16_MAX);
+        group->model_selector=args[0];group->member_count=args[3];
+        group->scale=(int16_t)args[1];group->member_parameter=args[2];
+        group->group_parameter=args[4];group->extra_parameter=args[8];
+        group->angle_step=(int16_t)(360u/args[3]);
+        group->descriptor_offset=descriptor_offset;
+        for (unsigned axis=0;axis<3;axis++)
+            group->center[axis]=(int32_t)(int16_t)args[5u+axis]*100;
+        return 1;
+    }
     case 0x7a: { /* FUN_00419fc0: attach a bounded skeletal child to this wrapper. */
         ARITY(4);
         if (args[1]>=script->program.function_count || args[3]<10)

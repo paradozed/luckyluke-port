@@ -15,14 +15,14 @@ treated as successful no-ops or variables returning zero.
 Against the installed original COD/BIB/BIZ assets, the bounded tracer produces:
 
 ```text
-24 updates:  calls=1437 supported=1394 blocked_contexts=43 objects=88 static_models=169
-240 updates: calls=8913 supported=8862 blocked_contexts=51 objects=88 static_models=169
+24 updates:  calls=1448 supported=1405 blocked_contexts=43 objects=88 static_models=169
+240 updates: calls=8924 supported=8873 blocked_contexts=51 objects=88 static_models=169
 directory: functions=118 condition_streams=13 virtual_tables=40 models=213
 projection=804 cell=311 camera_mode=1 speed=128
 bounds=[8200,202200,-20000,-3000] word=0 limit=200
 ```
 
-The 24-update run recognizes 1264 more host calls than the initial stage (130)
+The 24-update run recognizes 1275 more host calls than the initial stage (130)
 and registers 26 additional objects. At 240 updates, animation callbacks let
 more bodies resume, so later failures become reachable and the blocked-context
 count rises to51. These counts are not full-file handler
@@ -118,6 +118,11 @@ event latch, matching the boolean behavior of the related native handler.
 Command `0x7a` records the native skeletal child/parent attachment and blend
 parameters for Abilene's zero-root-offset calls. Vertex blending and the native
 attachment update callback are still absent.
+Command `0x39` validates its BIB selector and records Abilene's bounded orbital
+group setup (member count, scale, angular step, center, parameters and wrapper
+instance). The following per-member construction command and the group's native
+update/draw callbacks remain unimplemented, so no orbital sprites are built or
+rendered.
 `0x72` accepts the observed idempotent callback-enable requests for already
 registered model wrappers (instances28 and29); callback state transitions
 remain blocked because they register/reset native engine dispatch. Command
@@ -150,7 +155,7 @@ bounded BIB sprite sequences update metadata but are not drawn.
 
 | Blocking call | Contexts in this run | Native entry / next dependency |
 |---|---:|---|
-| command39 | 11 | 4121d0: orbital sprite group and native update/draw callbacks |
+| command53 | 11 | Per-member construction after `0x39`; orbital group update/draw callbacks |
 | variable17 / command96 | 7 / 5 | 409500 position comparison / 41b970 pose-driven sprite groups |
 | variable8e | 3 | Event and collision/projectile state |
 | variable39/99, command e8 | 2 / 2 / 1 | Model callback state and projectile trajectory setup |
