@@ -702,23 +702,43 @@ int ll_bib_get_selector(const LL_BibFile *bib, uint32_t selector,
     return 1;
 }
 
-int ll_bib_get_scene_pose(const LL_BibFile *bib, uint32_t selector,
-                          uint32_t index, LL_BibScenePose *out_pose)
+int ll_bib_get_indexed_record(const LL_BibFile *bib, uint32_t selector,
+                              uint32_t index, const unsigned char **data,
+                              size_t *size)
 {
     LL_BibSelector section;
     uint32_t directory_size, relative;
-    if (out_pose == NULL || !ll_bib_get_selector(bib, selector, &section) ||
+    if (data) *data = NULL;
+    if (size) *size = 0;
+    if (!data || !size || !ll_bib_get_selector(bib, selector, &section) ||
         !section.is_section || section.size < 4u) return 0;
     const unsigned char *group = bib->raw_data + section.offset;
     directory_size = read_u32le(group);
     if (directory_size < 4u || directory_size % 4u != 0 ||
         directory_size > section.size || index >= directory_size / 4u) return 0;
     relative = read_u32le(group + (size_t)index * 4u);
-    if (relative < directory_size || relative > section.size ||
-        section.size - relative < 24u) return 0;
+    if (relative < directory_size || relative >= section.size) return 0;
+    uint32_t end = section.size;
+    for (uint32_t entry = 0; entry < directory_size; entry += 4u) {
+        uint32_t offset = read_u32le(group + entry);
+        if (offset < directory_size || offset > section.size) return 0;
+        if (offset > relative && offset < end) end = offset;
+    }
+    *data = group + relative;
+    *size = end - relative;
+    return 1;
+}
+
+int ll_bib_get_scene_pose(const LL_BibFile *bib, uint32_t selector,
+                          uint32_t index, LL_BibScenePose *out_pose)
+{
+    const unsigned char *record;
+    size_t size;
+    if (!out_pose || !ll_bib_get_indexed_record(bib,selector,index,&record,&size) ||
+        size < 24u) return 0;
     for (uint32_t axis = 0; axis < 3; axis++) {
-        out_pose->position[axis] = read_i32le(group + relative + axis * 4u);
-        out_pose->angles[axis] = read_i32le(group + relative + 12u + axis * 4u);
+        out_pose->position[axis] = read_i32le(record + axis * 4u);
+        out_pose->angles[axis] = read_i32le(record + 12u + axis * 4u);
     }
     return 1;
 }

@@ -166,6 +166,11 @@ int ll_bib_get_selector_offset(const LL_BibFile *bib, uint32_t selector,
                                uint32_t *out_offset);
 int ll_bib_get_selector(const LL_BibFile *bib, uint32_t selector,
                         LL_BibSelector *out_selector);
+/* Borrow a directory-indexed record, bounded by the next distinct offset or
+ * section end. Outputs are cleared on failure; lifetime matches the BIB. */
+int ll_bib_get_indexed_record(const LL_BibFile *bib, uint32_t selector,
+                              uint32_t index, const unsigned char **data,
+                              size_t *size);
 /* Pose groups registered by SOOL command 0xf1 and indexed by 0x2e. */
 int ll_bib_get_scene_pose(const LL_BibFile *bib, uint32_t selector,
                           uint32_t index, LL_BibScenePose *out_pose);
