@@ -8,7 +8,7 @@ typedef struct {
     const int16_t *pcm; /* borrowed for the complete playback lifetime */
     size_t count;
     uint64_t position;
-    uint32_t step; /* source samples per output frame, 24.8 */
+    uint32_t step; /* source samples per output frame,24.8; zero holds the sample. */
     uint16_t gain[2];
     uint8_t active, reserved;
 } LL_AudioVoice;

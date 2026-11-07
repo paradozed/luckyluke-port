@@ -6,6 +6,8 @@ static int initialized;
 
 void ll_native_rng_reset(void)
 {
+    /* 46d7b0 leaves slot34 untouched: the 0..53 permutation even overwrites
+     * seeded slot54. Reseeding intentionally retains that native history. */
     uint32_t seed=0x09a4ec86u,next=1;
     words[54]=seed;
     for (unsigned i=0;i<54;i++) {

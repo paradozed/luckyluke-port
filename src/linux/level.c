@@ -202,8 +202,8 @@ int ll_level_set_state(LL_Level *level, int state)
 
     level->state = state;
 
-    /* State 2 is Abilene, the first level.  Other states are not yet ported. */
-    level->enabled = (state == 2) ? 1 : 0;
+    /* State2 is Abilene; state3 is its following Abi_Boss scene. */
+    level->enabled = (state == 2 || state == 3) ? 1 : 0;
     return level->enabled;
 }
 

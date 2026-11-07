@@ -14,11 +14,72 @@ static unsigned angle_index(int16_t angle)
 int16_t ll_native_sine(int16_t angle) { return native_sine[angle_index(angle)]; }
 int16_t ll_native_cosine(int16_t angle) { return native_cosine[angle_index(angle)]; }
 
-static int16_t native_angle(int32_t a, int32_t b)
+int16_t ll_native_angle(int32_t a, int32_t b)
 {
     /* FUN_004836a0: CRT atan2 descriptor at004c76b0; constants at
      * 004b8e40/004b8e38. Conversion truncates toward zero. */
     return (int16_t)(atan2(a,b)*57.29694043887547*11.378);
+}
+
+void ll_native_path_segment_reset(const int32_t start[3], const int32_t end[3],
+                                   uint32_t length, LL_NativePathSegmentState *out)
+{
+    LL_NativePathSegmentState state={0};
+    for (unsigned i=0;i<3;i++) {
+        uint16_t word=(uint16_t)((uint32_t)end[i]-(uint32_t)start[i]);
+        state.delta[i]=(int16_t)(word<32768?(int32_t)word:(int32_t)word-65536);
+        state.origin[i]=start[i];
+    }
+    uint16_t word=(uint16_t)length;
+    state.length=(int16_t)(word<32768?(int32_t)word:(int32_t)word-65536);
+    state.yaw=(int16_t)((ll_native_angle(state.delta[2],state.delta[0])+1024)&4095);
+    state.pitch=ll_native_angle(state.delta[1],state.length);
+    *out=state;
+}
+
+int ll_native_model_yaw(const int16_t *matrix, int16_t *yaw)
+{
+    if (!matrix || !yaw || matrix[0]<-4096 || matrix[0]>4096 ||
+        matrix[2]<-4096 || matrix[2]>4096) return 0;
+    /* Original constants at004b8e10..004b8e30 differ from atan2's. */
+    int angle=(int)(acos(matrix[0]/4096.0)*57.29577950560105*11.3777777778);
+    double sine_angle=asin(matrix[2]/4096.0)*57.29577950560105*11.37777777778;
+    if (sine_angle<0) sine_angle=4096.0-sine_angle;
+    if ((int)sine_angle<2048) angle=(-angle)&4095;
+    *yaw=(int16_t)angle;
+    return 1;
+}
+
+int ll_native_turn_towards(const int16_t *matrix, const int32_t source[3],
+                           const int32_t target[3], uint16_t cone, int16_t step,
+                           int16_t *next_yaw, int *changed, int *converged)
+{
+    int16_t yaw;
+    if (!source || !target || !next_yaw || !changed || !converged ||
+        !ll_native_model_yaw(matrix,&yaw)) return 0;
+    uint32_t word=(uint32_t)target[0]-(uint32_t)source[0];
+    int32_t dx,dz;memcpy(&dx,&word,sizeof(word));
+    word=(uint32_t)target[2]-(uint32_t)source[2];memcpy(&dz,&word,sizeof(word));
+    *changed=0;*converged=0;*next_yaw=yaw;
+    if (!dx && !dz) return 1;
+    int32_t negative_z;word=0u-(uint32_t)dz;memcpy(&negative_z,&word,sizeof(word));
+    unsigned relative=(unsigned)(ll_native_angle(negative_z,dx)-1024+yaw)&4095u;
+    unsigned tolerance=cone&4095u;
+    int64_t absolute_x=dx<0?-(int64_t)dx:dx;
+    if (!(relative<tolerance || relative>4096u-tolerance) || absolute_x>=10000) return 1;
+    int32_t negative_x;word=0u-(uint32_t)dx;memcpy(&negative_x,&word,sizeof(word));
+    unsigned desired=(unsigned)ll_native_angle(negative_z,negative_x)&4095u;
+    unsigned current=(unsigned)(yaw+1024)&4095u;
+    int difference=(int)desired-(int)current;
+    if (difference<0) difference=-difference;
+    *changed=1;
+    if (difference<100) {
+        *next_yaw=(int16_t)(desired-1024u);*converged=1;
+    } else {
+        int value=(int)current+(desired<current?-(int)step:(int)step)-1024;
+        *next_yaw=(int16_t)value;
+    }
+    return 1;
 }
 
 uint16_t ll_native_distance100(const int32_t a[3], const int32_t b[3])
@@ -32,11 +93,11 @@ uint16_t ll_native_distance100(const int32_t a[3], const int32_t b[3])
     }
     uint16_t length=delta[0];
     if (delta[2]) {
-        uint16_t cosine=(uint16_t)ll_native_cosine(native_angle(delta[0],delta[2]));
+        uint16_t cosine=(uint16_t)ll_native_cosine(ll_native_angle(delta[0],delta[2]));
         if (cosine>=499) length=(uint16_t)(((uint32_t)delta[2]*4096u)/cosine);
     }
     if (length) {
-        uint16_t cosine=(uint16_t)ll_native_cosine(native_angle(delta[1],length));
+        uint16_t cosine=(uint16_t)ll_native_cosine(ll_native_angle(delta[1],length));
         length=cosine>=499 ? (uint16_t)(((uint32_t)length*4096u)/cosine) : delta[1];
     } else length=delta[1];
     if (length<delta[0] || length<delta[1] || length<delta[2]) length=65535;
@@ -56,7 +117,7 @@ uint16_t ll_native_screen_pan(const int32_t a[2], const int32_t b[2])
     if (!dy) return dx>0 ? 0 : 2048;
     int32_t abs_y=dy<0 ? signed32(0u-(uint32_t)dy) : dy;
     int32_t abs_x=dx<0 ? signed32(0u-(uint32_t)dx) : dx;
-    int16_t angle=native_angle(abs_y,abs_x);
+    int16_t angle=ll_native_angle(abs_y,abs_x);
     return (uint16_t)(dx>0 ? angle : 2048-angle);
 }
 

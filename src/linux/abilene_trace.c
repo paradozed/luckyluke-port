@@ -21,8 +21,10 @@ static unsigned char *read_file(const char *path, size_t *size)
 
 int main(int argc, char **argv)
 {
+    const char *pause_path=NULL;
+    if (argc>=5 && !strcmp(argv[argc-2],"--pause-archive")) { pause_path=argv[argc-1];argc-=2; }
     if (argc<3 || argc>5) {
-        fprintf(stderr,"usage: abilene-trace abilene.cod abilene.bib [updates=24] [abilene.biz]\n       abilene-trace abilene.cod abilene.bib abilene.biz [updates=24]\n");return 2;
+        fprintf(stderr,"usage: abilene-trace abilene.cod abilene.bib [updates=24] [abilene.biz]\n       abilene-trace abilene.cod abilene.bib abilene.biz [updates=24]\n       append --pause-archive MENU_F.KXP to enable the original pause interface\n");return 2;
     }
     unsigned long updates=24;
     int biz_index=0;
@@ -57,6 +59,14 @@ int main(int argc, char **argv)
         ll_level_script_close(&script);return 2;
     }
     free(biz);
+    if (pause_path) {
+        size_t pause_size=0;unsigned char *pause_data=read_file(pause_path,&pause_size);
+        if (!pause_data || !ll_level_script_set_pause_archive(&script,pause_data,pause_size)) {
+            fprintf(stderr,"ERROR: %s\n",pause_data?script.error:"cannot read pause archive");
+            free(pause_data);ll_level_script_close(&script);return 2;
+        }
+        free(pause_data);
+    }
     unsigned conditions=0,virtuals=0;
     for (unsigned i=0;i<script.program.function_count;i++) {
         conditions+=script.program.functions[i].conditions_start!=UINT16_MAX;
@@ -71,6 +81,6 @@ int main(int argc, char **argv)
         script.native.camera_mode,script.native.camera_speed,script.native.camera_bounds[0],
         script.native.camera_bounds[1],script.native.camera_bounds[2],script.native.camera_bounds[3],
         script.native.camera_word,script.native.camera_limit);
-    int result=script.blocked_count?3:0;
+    int result=(script.blocked_count || script.player.blocked || script.native.camera_blocked || script.native.collision_blocked_count)?3:0;
     ll_level_script_close(&script);return result;
 }

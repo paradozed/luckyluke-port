@@ -17,6 +17,7 @@
 #include "sool.h"
 #include "audio_mix.h"
 #include "native_camera.h"
+#include "native_animation.h"
 #include "native_rng.h"
 #include "level_script.h"
 
@@ -146,10 +147,15 @@ static struct {
     int has_reference;
 } menu_camera;
 static unsigned int menu_asset_errors;
-static unsigned char *abilene_cod_data;
+static int scene_load_failed;
 static LL_LevelScript abilene_script;
+static SDL_AudioDeviceID abilene_audio_device;
+static void abilene_audio_init(void);
+static void abilene_audio_shutdown(void);
 static uint32_t abilene_script_tick;
+static LL_MenuTexture abilene_pause_textures[LL_PAUSE_IMAGES];
 static int requested_game_state;
+static uint16_t menu_control_profile;
 static unsigned char *abilene_archive_data;
 static unsigned char *fixgfx_archive_data;
 
@@ -186,10 +192,47 @@ static unsigned char *read_cd_file(const char *relative_path, size_t *out_size)
     return data;
 }
 
-/* Game state (mirrors the original DAT_004e8914 selector).  State 1 is the
- * main menu; state 2 is the first level, Abilene. */
+/* Game state (mirrors the original DAT_004e8914 selector). State1 is the
+ * main menu; state2 is Abilene and state3 its following Abi_Boss scene. */
 static int game_state = 1;
 static LL_Level game_level;
+
+
+static int native_scene_active(void)
+{
+    return game_state==2 || game_state==3;
+}
+
+static int load_native_scene(unsigned scene)
+{
+    const char *cod_path=scene==3?"ABI_BOSS/abi_boss.cod":"ABILENE/abilene.cod";
+    const char *bib_path=scene==3?"ABI_BOSS/ABI_BOSS.BIB":"ABILENE/abilene.bib";
+    const char *biz_path=scene==3?"ABI_BOSS/ABI_BOSS.BIZ":"ABILENE/abilene.biz";
+    size_t code_size=0,bib_size=0,biz_size=0,pause_size=0;
+    unsigned char *code=read_cd_file(cod_path,&code_size),*bib=read_cd_file(bib_path,&bib_size);
+    unsigned char *biz=read_cd_file(biz_path,&biz_size);
+    char pause_path[96];snprintf(pause_path,sizeof(pause_path),"win/graphics/MENU_%c.KXP",
+        toupper((unsigned char)asset_config.language_code));
+    unsigned char *pause=read_cd_file(pause_path,&pause_size);
+    int was_loaded=abilene_script.loaded;
+    abilene_script.trace=getenv("LL_TRACE_LEVEL_SOOL")?stderr:NULL;
+    int ok=code && bib && biz && ll_level_script_replace(&abilene_script,
+        code,code_size,bib,bib_size,biz,biz_size,pause,pause_size);
+    if (!ok) fprintf(stderr,"ERROR: cannot load original scene%u (%s): %s\n",scene,cod_path,
+        !code?cod_path:!bib?bib_path:!biz?biz_path:abilene_script.error);
+    free(code);free(bib);free(biz);free(pause);
+    if (!ok) return 0;
+    if (!pause_size) fprintf(stderr,"ERROR: cannot load original pause interface: %s\n",pause_path);
+    /* 4056d0 retains mission cards for Abi_Boss; ordinary scene2 resets them. */
+    if (scene!=3) abilene_script.native.player_cards=0;
+    if (!was_loaded) abilene_script.native.control_profile=abilene_script.native.saved_control_profile=(uint8_t)menu_control_profile;
+    abilene_audio_init();
+    if (abilene_audio_device) SDL_LockAudioDevice(abilene_audio_device);
+    ll_level_script_update(&abilene_script);ll_level_script_report(&abilene_script,stderr);
+    if (abilene_audio_device) SDL_UnlockAudioDevice(abilene_audio_device);
+    abilene_script_tick=(uint32_t)((uint64_t)SDL_GetTicks()*24u/1000u);
+    return 1;
+}
 
 static int load_abilene_assets(void)
 {
@@ -217,34 +260,7 @@ static int load_abilene_assets(void)
         free(pcx);
     }
 
-    if (abilene_cod_data == NULL) {
-        abilene_cod_data = read_cd_file("ABILENE/abilene.cod", &size);
-        if (abilene_cod_data == NULL) {
-            fprintf(stderr, "ERROR: cannot read CD script ABILENE/abilene.cod\n");
-        } else {
-            size_t bib_size=0;
-            unsigned char *bib=read_cd_file("ABILENE/abilene.bib",&bib_size);
-            if (!bib || !ll_level_script_open(&abilene_script,abilene_cod_data,size,
-                    bib,bib_size,getenv("LL_TRACE_LEVEL_SOOL")?stderr:NULL)) {
-                fprintf(stderr,"ERROR: cannot load original Abilene SOOL/BIB: %s\n",
-                    bib?abilene_script.error:"missing ABILENE/abilene.bib");
-            } else {
-                size_t biz_size=0;
-                unsigned char *biz=read_cd_file("ABILENE/abilene.biz",&biz_size);
-                if (!biz || !ll_level_script_set_biz(&abilene_script,biz,biz_size)) {
-                    fprintf(stderr,"ERROR: cannot attach original Abilene BIZ: %s\n",
-                        biz?abilene_script.error:"missing ABILENE/abilene.biz");
-                    ll_level_script_close(&abilene_script);
-                } else {
-                    ll_level_script_update(&abilene_script);
-                    ll_level_script_report(&abilene_script,stderr);
-                    abilene_script_tick=(uint32_t)((uint64_t)SDL_GetTicks()*24u/1000u);
-                }
-                free(biz);
-            }
-            free(bib);
-        }
-    }
+    if (!abilene_script.loaded) load_native_scene(2);
 
     if (fixgfx_archive_data == NULL) {
         fixgfx_archive_data = read_cd_file("win/graphics/FIXGFX.KXP", &size);
@@ -450,7 +466,6 @@ static const struct { uint16_t code, level; } menu_passwords[] = {
     {0x3301,14},{0x0230,17},{0x1223,18},{0x0102,19},{0x2130,23}
 };
 static uint16_t menu_password_level=2;
-static uint16_t menu_control_profile;
 static uint8_t menu_keyboard_hand;
 static uint8_t menu_sound_stereo=1, menu_sfx_volume=100, menu_music_volume=70, menu_cd_track=4;
 static LL_AudioMixer menu_audio_mixer;
@@ -535,6 +550,41 @@ static void menu_audio_init(void)
 invalid_bank:
     fprintf(stderr,"ERROR: cannot decode menu sound bank: %s\n",ll_biz_error(&menu_biz));
     menu_audio_shutdown();
+}
+
+static void abilene_audio_callback(void *userdata, Uint8 *stream, int length)
+{
+    LL_NativeAudio *audio=userdata;
+    memset(stream,0,(size_t)length);
+    ll_native_audio_render(audio,(int16_t *)stream,(size_t)length/4u);
+}
+
+static void abilene_audio_shutdown(void)
+{
+    if (abilene_audio_device) SDL_CloseAudioDevice(abilene_audio_device);
+    abilene_audio_device=0;abilene_script.audio.device_active=0;
+}
+
+static void abilene_audio_init(void)
+{
+    abilene_audio_shutdown();
+    LL_NativeAudio *audio=&abilene_script.audio;
+    audio->stereo=menu_sound_stereo;audio->master_volume=menu_sfx_volume;
+    audio->enabled=audio->ready && asset_config.sound_enabled;
+    if (!audio->enabled) return;
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO)!=0) goto failed;
+    SDL_AudioSpec wanted={0};
+    wanted.freq=16000;wanted.format=AUDIO_S16SYS;wanted.channels=2;
+    wanted.samples=512;wanted.callback=abilene_audio_callback;wanted.userdata=audio;
+    abilene_audio_device=SDL_OpenAudioDevice(NULL,0,&wanted,NULL,0);
+    if (!abilene_audio_device) goto failed;
+    audio->device_active=1;
+    SDL_PauseAudioDevice(abilene_audio_device,0);
+    fprintf(stderr,"INFO: Abilene audio enabled (%u original samples, 64 voices)\n",audio->sample_count);
+    return;
+failed:
+    fprintf(stderr,"ERROR: cannot open Abilene audio: %s\n",SDL_GetError());
+    audio->enabled=0;
 }
 
 static uint16_t menu_audio_play(uint16_t owner, uint16_t sample, int16_t pitch, uint16_t volume,
@@ -1324,6 +1374,7 @@ static int load_and_execute_menu_script(void)
                 ll_sool_program_error(&menu_program));
         return 0;
     }
+    ll_native_rng_reset(); /* 4067e0 reseeds before entering every outer scene. */
     menu_program_loaded = 1;
     menu_script_contexts = calloc(menu_program.function_count, sizeof(*menu_script_contexts));
     if (menu_script_contexts == NULL) {
@@ -1481,6 +1532,36 @@ static void menu_update_animation_callbacks(uint32_t tick)
     }
 }
 
+static uint16_t read_native_actions(void)
+{
+    const Uint8 *keys = SDL_GetKeyboardState(NULL);
+    static const SDL_Scancode direction_keys[2][4] = {
+        {SDL_SCANCODE_UP,SDL_SCANCODE_DOWN,SDL_SCANCODE_LEFT,SDL_SCANCODE_RIGHT},
+        {SDL_SCANCODE_G,SDL_SCANCODE_V,SDL_SCANCODE_C,SDL_SCANCODE_B}
+    };
+    static const uint16_t direction_masks[4]={0x10,0x40,0x80,0x20};
+    static const SDL_Scancode action_keys[2][4] = {
+        {SDL_SCANCODE_C,SDL_SCANCODE_G,SDL_SCANCODE_B,SDL_SCANCODE_V},
+        {SDL_SCANCODE_LEFT,SDL_SCANCODE_UP,SDL_SCANCODE_RIGHT,SDL_SCANCODE_DOWN}
+    };
+    /* FUN_0045e280: speed, jump, fire, dynamite indices per profile. */
+    static const uint8_t profiles[3][4]={{0,1,2,3},{2,1,0,3},{3,2,0,1}};
+    static const uint16_t action_masks[4]={0x4000,0x8000,0x2000,0x1000};
+    uint16_t actions=0;
+    unsigned hand=native_scene_active() && abilene_script.pause.paused?0:menu_keyboard_hand;
+    unsigned profile=native_scene_active()?abilene_script.native.control_profile:menu_control_profile;
+    for (unsigned action=0; action<4; action++) {
+        if (keys[direction_keys[hand][action]]) actions |= direction_masks[action];
+        if (keys[action_keys[hand][profiles[profile][action]]]) actions |= action_masks[action];
+    }
+    if (keys[SDL_SCANCODE_RETURN]) actions |= 8;
+    if (keys[SDL_SCANCODE_S]) actions |= 1;
+    if (keys[SDL_SCANCODE_F]) actions |= 0x100;
+    if ((actions & 0xa0u) == 0xa0u) actions &= (uint16_t)~0xa0u;
+    if ((actions & 0x50u) == 0x50u) actions &= (uint16_t)~0x50u;
+    return actions;
+}
+
 static void update_menu_scripts(uint32_t tick)
 {
     static uint32_t previous_step;
@@ -1502,28 +1583,7 @@ static void update_menu_scripts(uint32_t tick)
     }
     menu_update_primitive_origins();
     const Uint8 *keys = SDL_GetKeyboardState(NULL);
-    static const SDL_Scancode direction_keys[2][4] = {
-        {SDL_SCANCODE_UP,SDL_SCANCODE_DOWN,SDL_SCANCODE_LEFT,SDL_SCANCODE_RIGHT},
-        {SDL_SCANCODE_G,SDL_SCANCODE_V,SDL_SCANCODE_C,SDL_SCANCODE_B}
-    };
-    static const uint16_t direction_masks[4]={0x10,0x40,0x80,0x20};
-    static const SDL_Scancode action_keys[2][4] = {
-        {SDL_SCANCODE_C,SDL_SCANCODE_G,SDL_SCANCODE_B,SDL_SCANCODE_V},
-        {SDL_SCANCODE_LEFT,SDL_SCANCODE_UP,SDL_SCANCODE_RIGHT,SDL_SCANCODE_DOWN}
-    };
-    /* FUN_0045e280: speed, jump, fire, dynamite indices per profile. */
-    static const uint8_t profiles[3][4]={{0,1,2,3},{2,1,0,3},{3,2,0,1}};
-    static const uint16_t action_masks[4]={0x4000,0x8000,0x2000,0x1000};
-    uint16_t actions=0;
-    for (unsigned action=0; action<4; action++) {
-        if (keys[direction_keys[menu_keyboard_hand][action]]) actions |= direction_masks[action];
-        if (keys[action_keys[menu_keyboard_hand][profiles[menu_control_profile][action]]]) actions |= action_masks[action];
-    }
-    if (keys[SDL_SCANCODE_RETURN]) actions |= 8;
-    if (keys[SDL_SCANCODE_S]) actions |= 1;
-    if (keys[SDL_SCANCODE_F]) actions |= 0x100;
-    if ((actions & 0xa0u) == 0xa0u) actions &= (uint16_t)~0xa0u;
-    if ((actions & 0x50u) == 0x50u) actions &= (uint16_t)~0x50u;
+    uint16_t actions=read_native_actions();
     menu_pressed_actions = (uint16_t)((menu_actions ^ actions) & (uint16_t)~menu_actions);
     menu_actions = actions;
     for (size_t key = 0; key < SDL_NUM_SCANCODES; key++) {
@@ -2120,98 +2180,16 @@ static const LL_MenuMaterial *menu_material(uint16_t object_index)
     return material;
 }
 
-/* Model rotation uses FUN_0047c630, distinct from the camera builder. */
 static int menu_build_animation_pose(uint32_t model_index, uint16_t selector, uint32_t frame, uint32_t fraction,
                                  int play_once, LL_BibVertex *vertices, const LL_BibPackedPose *initial,
                                  uint32_t initial_fraction, LL_BibPackedPose *evaluated)
 {
-    const LL_Bib3dxModel *model = ll_bib_get_model(&game_level.bib, model_index);
-    const LL_BibAnimationTable *table = ll_bib_get_animation_table(&game_level.bib, selector);
-    if (model == NULL || table == NULL) return 0;
-    LL_BibPackedPose *poses = calloc(table->record_type, sizeof(*poses));
-    if (poses == NULL) return 0;
-    if (!ll_bib_decode_animation_frame(&game_level.bib, selector, frame, poses,
-                                        table->record_type, NULL)) { free(poses); return 0; }
-    if (fraction != 0) {
-        LL_BibPackedPose *next = calloc(table->record_type, sizeof(*next));
-        if (next == NULL) { free(poses); return 0; }
-        if (!ll_bib_decode_animation_frame(&game_level.bib, selector,
-                (play_once && frame + 1u == table->record_count ? frame : (frame + 1u) % table->record_count), next, table->record_type, NULL)) {
-            free(next); free(poses); return 0;
-        }
-        for (unsigned p = 0; p < table->record_type; p++)
-            ll_bib_interpolate_pose(&poses[p], &next[p], fraction, &poses[p]);
-        free(next);
-    }
-    if (initial) for (unsigned part=0;part<table->record_type;part++)
-        ll_bib_interpolate_pose(&initial[part],&poses[part],initial_fraction,&poses[part]);
-    GLdouble current[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-    GLdouble saved[64][16];
-    size_t depth = 0;
-    int ok = 1;
-    for (uint32_t i = 0;; i++) {
-        int32_t entry;
-        if (!ll_bib_get_model_hierarchy_entry(&game_level.bib, model_index, i, &entry)) break;
-        if (entry < 0) {
-            if (entry == -2 || entry == -3) {
-                if (depth == 0) { ok = 0; break; }
-                memcpy(current, saved[--depth], sizeof(current));
-            }
-            if (entry == -1 || entry == -3) {
-                if (depth == 64) { ok = 0; break; }
-                memcpy(saved[depth++], current, sizeof(current));
-            }
-            continue;
-        }
-        LL_BibModelPart part;
-        if ((uint32_t)entry >= table->record_type ||
-            !ll_bib_get_model_part(&game_level.bib, model_index, (uint32_t)entry, &part)) { ok = 0; break; }
-        const LL_BibPackedPose *pose = &poses[entry];
-        int32_t pivot[3] = {0,0,0};
-        if (i != 0) for (unsigned a = 0; a < 3; a++) pivot[a] = vertices[part.pivot_vertex].position[a];
-        int16_t basis[9];
-        for (unsigned r=0;r<3;r++)
-            for (unsigned c=0;c<3;c++) basis[r*3u+c]=(int16_t)(current[c*4u+r]*4096.0);
-        if (pose->present_groups & 2u) {
-            int16_t offset[3]={pose->channels[3],pose->channels[4],pose->channels[5]}, translated[3];
-            ll_native_vertex_transform(basis,offset,pivot,NULL,translated);
-            for (unsigned axis=0;axis<3;axis++) pivot[axis]=translated[axis];
-        }
-        /* FUN_004824a0 installs each pivot as the current translation.
-         * Explicit translation channels are offsets from that pivot, rotated
-         * through the current parent basis. */
-        for (unsigned axis = 0; axis < 3; axis++) current[12u + axis] = pivot[axis];
-        if (pose->present_groups & 1u) {
-            int32_t angles[3] = {pose->channels[0],pose->channels[1],pose->channels[2]};
-            int16_t local[3][3], composed[9];
-            ll_native_model_rotation(angles,local);
-            ll_native_rotation_multiply(basis,&local[0][0],composed);
-            memcpy(basis,composed,sizeof(basis));
-            for (unsigned r=0;r<3;r++)
-                for (unsigned c=0;c<3;c++) current[c*4u+r]=composed[r*3u+c]/4096.0;
-        }
-        int32_t scale[3]={4096+pose->channels[6],4096+pose->channels[7],4096+pose->channels[8]};
-        int has_scale=(pose->present_groups & 4u)!=0;
-        int32_t next_entry=0;
-        if (has_scale && (pose->present_groups & 2u) &&
-            ll_bib_get_model_hierarchy_entry(&game_level.bib,model_index,i+1u,&next_entry) &&
-            (next_entry==-2 || next_entry==-3)) {
-            /* FUN_004823e0 branch: quantize the scaled basis, rather
-             * than prescaling each source vertex (FUN_0047f830). */
-            ll_native_rotation_scale(basis,scale);
-            for (unsigned r=0;r<3;r++)
-                for (unsigned c=0;c<3;c++) current[c*4u+r]=basis[r*3u+c]/4096.0;
-            has_scale=0;
-        }
-        for (uint32_t v = part.first_vertex; v < (uint32_t)part.first_vertex + part.vertex_count; v++) {
-            ll_native_vertex_transform(basis,model->vertices[v].position,pivot,
-                has_scale ? scale : NULL,vertices[v].position);
-        }
-        if (!ok) break;
-    }
-    if (ok && evaluated) memcpy(evaluated,poses,(size_t)table->record_type*sizeof(*poses));
-    free(poses);
-    return ok;
+    const LL_BibAnimationTable *table=ll_bib_get_animation_table(&game_level.bib,selector);
+    if (!table || !table->record_count) return 0;
+    uint32_t next=(play_once && frame+1u==table->record_count) ? frame : (frame+1u)%table->record_count;
+    const LL_Bib3dxModel *model=ll_bib_get_model(&game_level.bib,model_index);
+    return model && ll_native_animation_vertices(&game_level.bib,model_index,selector,frame,next,fraction,
+        vertices,model->vertex_count,initial,initial_fraction,evaluated);
 }
 
 static int menu_build_first_pose(uint32_t model_index, uint16_t selector, uint32_t frame, uint32_t fraction,
@@ -2314,6 +2292,364 @@ static void menu_render_screen_sprites(void)
     }
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_ALPHA_TEST);
+}
+
+static GLuint abilene_sprite_textures[260];
+static uint16_t abilene_sprite_texture_objects[260];
+static uint32_t abilene_sprite_texture_sizes[260][2];
+static uint8_t abilene_sprite_texture_attempted[260];
+static LL_MenuMaterial abilene_scene_materials[512];
+static unsigned abilene_scene_material_count;
+
+typedef struct {
+    LL_BibVertex *vertices;
+    uint32_t model_index, fraction;
+    uint16_t selector, frame, next_frame;
+    uint8_t initialized, evaluated, valid, animated, active, failure_reported;
+    uint8_t motion_active, motion_axis, reverse;
+} LL_AbileneModelPose;
+static LL_AbileneModelPose abilene_model_poses[260];
+
+static void abilene_clear_sprite_textures(void)
+{
+    for (unsigned i=0;i<LL_PAUSE_IMAGES;i++) ll_menu_art_destroy(&abilene_pause_textures[i]);
+    for (unsigned i=0;i<260;i++) free(abilene_model_poses[i].vertices);
+    memset(abilene_model_poses,0,sizeof(abilene_model_poses));
+    for (unsigned i=0;i<abilene_scene_material_count;i++)
+        if (abilene_scene_materials[i].texture) glDeleteTextures(1,&abilene_scene_materials[i].texture);
+    memset(abilene_scene_materials,0,sizeof(abilene_scene_materials));
+    abilene_scene_material_count=0;
+    for (unsigned i=0;i<260;i++)
+        if (abilene_sprite_textures[i]) glDeleteTextures(1,&abilene_sprite_textures[i]);
+    memset(abilene_sprite_textures,0,sizeof(abilene_sprite_textures));
+    memset(abilene_sprite_texture_attempted,0,sizeof(abilene_sprite_texture_attempted));
+}
+
+static const LL_MenuMaterial *abilene_scene_material(uint16_t index)
+{
+    for (unsigned i=0;i<abilene_scene_material_count;i++)
+        if (abilene_scene_materials[i].object==index) return &abilene_scene_materials[i];
+    if (abilene_scene_material_count>=512) return NULL;
+    LL_MenuMaterial *material=&abilene_scene_materials[abilene_scene_material_count++];
+    material->object=index;
+    LL_BizObject object;unsigned char pixels[256*256*4];
+    if (!ll_biz_get_object(&abilene_script.biz,index,&object) ||
+        !ll_biz_get_sprite(&abilene_script.biz,object.sprite_index,&material->sprite) ||
+        !ll_biz_decode_sprite(&abilene_script.biz,object.sprite_index,object.tile_index,
+            pixels,sizeof(pixels),&material->width,&material->height)) {
+        fprintf(stderr,"ERROR: cannot decode Abilene scene material BIZ object%u\n",index);
+        return material;
+    }
+    glGenTextures(1,&material->texture);glBindTexture(GL_TEXTURE_2D,material->texture);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,(GLsizei)material->width,(GLsizei)material->height,
+        0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+    return material;
+}
+
+/* Apply the script's retained frame to the original geometry. Cache by
+ * instance: clones can share mesh data while playing independent animations. */
+static const LL_BibVertex *abilene_animated_vertices(unsigned instance)
+{
+    const LL_LevelScriptObject *object=&abilene_script.objects[instance];
+    const LL_Bib3dxModel *model=&abilene_script.bib.models[object->model_index];
+    LL_AbileneModelPose *cache=&abilene_model_poses[instance];
+    if (!cache->initialized || cache->model_index!=object->model_index) {
+        free(cache->vertices);memset(cache,0,sizeof(*cache));
+        cache->initialized=1;cache->model_index=object->model_index;
+        cache->vertices=calloc(model->vertex_count,sizeof(*cache->vertices));
+        if (!cache->vertices) fprintf(stderr,"ERROR: cannot allocate Abilene skeleton %u (%s)\n",instance,model->name);
+    }
+    if (!cache->vertices) return NULL;
+    if (cache->evaluated && cache->animated==object->animation_pose_present && cache->active==object->animation_active &&
+        cache->selector==object->animation_selector && cache->frame==object->animation_frame &&
+        cache->next_frame==object->animation_next_frame && cache->fraction==object->animation_fraction &&
+        cache->motion_active==object->animation_root_motion && cache->motion_axis==object->animation_root_axis &&
+        cache->reverse==object->animation_reverse)
+        return cache->valid ? cache->vertices : NULL;
+    cache->evaluated=1;cache->animated=object->animation_pose_present;cache->active=object->animation_active;
+    cache->selector=object->animation_selector;cache->frame=object->animation_frame;
+    cache->next_frame=object->animation_next_frame;cache->fraction=object->animation_fraction;
+    cache->motion_active=object->animation_root_motion;cache->motion_axis=object->animation_root_axis;
+    cache->reverse=object->animation_reverse;
+    cache->valid=(uint8_t)ll_level_script_model_vertices(&abilene_script,object,cache->vertices,model->vertex_count);
+    if (!cache->valid && !cache->failure_reported)
+        fprintf(stderr,"ERROR: cannot evaluate Abilene instance %u (%s), animation %u frame %u\n",
+            instance,model->name,object->animation_selector,object->animation_frame);
+    cache->failure_reported=(uint8_t)!cache->valid;
+    return cache->valid ? cache->vertices : NULL;
+}
+
+static void abilene_render_model(const LL_Bib3dxModel *model, const LL_BibVertex *vertices,
+                                  const int16_t *rotation, const int32_t position[3],
+                                  const int16_t *view, const int32_t translation[3],
+                                  const LL_NativeMaterial *material)
+{
+    static const unsigned corners[6]={0,1,3,3,1,2};
+    int16_t matrix[3][3];int32_t offset[3];
+    ll_native_camera_model_view(view,translation,rotation,position,&matrix[0][0],offset);
+    /* Native textured primitives use 128 as unity. A twofold texture combine
+     * also retains brightness above unity until the final framebuffer clamp. */
+    glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_COMBINE);
+    glTexEnvi(GL_TEXTURE_ENV,GL_COMBINE_RGB,GL_MODULATE);
+    glTexEnvi(GL_TEXTURE_ENV,GL_SOURCE0_RGB,GL_TEXTURE);
+    glTexEnvi(GL_TEXTURE_ENV,GL_SOURCE1_RGB,GL_PRIMARY_COLOR);
+    glTexEnvi(GL_TEXTURE_ENV,GL_OPERAND0_RGB,GL_SRC_COLOR);
+    glTexEnvi(GL_TEXTURE_ENV,GL_OPERAND1_RGB,GL_SRC_COLOR);
+    glTexEnvi(GL_TEXTURE_ENV,GL_RGB_SCALE,2);
+    for (unsigned g=0;g<model->group_count;g++) {
+        const LL_BibGeometryGroup *group=&model->groups[g];
+        if (!group->elements || group->type>7) continue;
+        unsigned count=(group->type&1u)?6u:3u;
+        for (unsigned e=0;e<group->element_count;e++) {
+            const LL_BibGeometryElement *face=&group->elements[e];
+            const LL_MenuMaterial *texture=face->has_material?abilene_scene_material(face->biz_object):NULL;
+            if (face->has_material && (!texture || !texture->texture)) continue;
+            int32_t camera_vertices[6][3];int valid=1;
+            for (unsigned n=0;n<count;n++) {
+                unsigned corner=count==6?corners[n]:n;
+                if (face->vertex_indices[corner]>=model->vertex_count) { valid=0;break; }
+                ll_native_camera_vertex(&matrix[0][0],offset,
+                    vertices[face->vertex_indices[corner]].position,camera_vertices[n]);
+            }
+            if (!valid) continue;
+            if (texture) {
+                glEnable(GL_TEXTURE_2D);glBindTexture(GL_TEXTURE_2D,texture->texture);
+                glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,0);
+            } else { glDisable(GL_TEXTURE_2D);glDisable(GL_ALPHA_TEST); }
+            glBegin(GL_TRIANGLES);
+            for (unsigned n=0;n<count;n++) {
+                unsigned corner=count==6?corners[n]:n;
+                unsigned attribute=count==6 && corner>=2?5u-corner:corner;
+                uint32_t color=group->type>=4?face->corner_colors[attribute]:face->attributes;
+                if (texture) {
+                    uint32_t tint=ll_native_material_textured(color,
+                        material && material->applied && group->type<4?material->multiplier:256);
+                    glColor4f((tint&255u)/256.0f,((tint>>8)&255u)/256.0f,
+                        ((tint>>16)&255u)/256.0f,1);
+                    glTexCoord2d((double)((int)face->corner_data[attribute][0]-texture->sprite.texture_x)/texture->width,
+                        (double)((int)face->corner_data[attribute][1]-texture->sprite.texture_y)/texture->height);
+                } else {
+                    if (material && material->applied && group->type<2)
+                        color=ll_native_material_flat(color,material->multiplier);
+                    glColor3ub((GLubyte)color,(GLubyte)(color>>8),(GLubyte)(color>>16));
+                }
+                glVertex3iv(camera_vertices[n]);
+            }
+            glEnd();
+        }
+    }
+    glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
+    glTexEnvi(GL_TEXTURE_ENV,GL_RGB_SCALE,1);
+}
+
+static void abilene_render_world_sprite(const LL_LevelScriptObject *sprite,
+                                         const int16_t *view, const int32_t translation[3])
+{
+    if (!sprite->sprite_primitives_present || !sprite->pose) return;
+    const LL_MenuMaterial *texture=abilene_scene_material(sprite->biz_object);
+    int32_t vertices[4][3];
+    if (!texture || !texture->texture || !ll_level_script_world_sprite_vertices(&abilene_script,sprite,
+            view,translation,vertices)) return;
+    unsigned width=(uint8_t)((unsigned)texture->sprite.width_units*4u),height=(uint8_t)texture->sprite.height;
+    if (!width) width=255;
+    if (!height) height=255;
+    if (width>255u-texture->sprite.texture_x) width=255u-texture->sprite.texture_x;
+    if (height>255u-texture->sprite.texture_y) height=255u-texture->sprite.texture_y;
+    if (width<2 || height<2) return;
+    static const unsigned corners[6]={0,1,2,2,1,3};
+    glEnable(GL_TEXTURE_2D);glBindTexture(GL_TEXTURE_2D,texture->texture);
+    glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,0);glColor3ub(255,255,255);
+    glBegin(GL_TRIANGLES);
+    for (unsigned n=0;n<6;n++) {
+        unsigned corner=corners[n];
+        glTexCoord2d(((corner&1u)?width-1.0:1.0)/texture->width,
+            ((corner&2u)?height-1.0:1.0)/texture->height);
+        glVertex3iv(vertices[corner]);
+    }
+    glEnd();
+}
+
+static void abilene_render_backgrounds(void)
+{
+    if (!abilene_script.native.background_enabled) return;
+    glMatrixMode(GL_PROJECTION);glLoadIdentity();glOrtho(0,640,480,0,-1,1);
+    glMatrixMode(GL_MODELVIEW);glLoadIdentity();
+    glDisable(GL_DEPTH_TEST);glDepthMask(GL_FALSE);glDisable(GL_BLEND);glShadeModel(GL_SMOOTH);
+    static const unsigned corners[4]={0,1,3,2};
+    for (unsigned owner=0;owner<abilene_script.program.function_count;owner++) {
+        const LL_NativeBackground *background=abilene_script.backgrounds[owner];
+        if (!background) continue;
+        unsigned order[LL_BACKGROUND_LAYERS];
+        for (unsigned i=0;i<background->layer_count;i++) {
+            unsigned at=i;
+            while (at && background->layers[order[at-1u]].order>background->layers[i].order) {
+                order[at]=order[at-1u];at--;
+            }
+            order[at]=i;
+        }
+        for (unsigned layer=0;layer<background->layer_count;layer++)
+            for (unsigned primitive=0;primitive<background->layers[order[layer]].primitive_count;primitive++) {
+                LL_BackgroundQuad quad;
+                if (!ll_native_background_quad(background,order[layer],primitive,&quad)) continue;
+                const LL_MenuMaterial *material=quad.textured?abilene_scene_material(quad.object):NULL;
+                if (quad.textured) {
+                    if (!material || !material->texture) continue;
+                    glEnable(GL_TEXTURE_2D);glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,0);
+                    glBindTexture(GL_TEXTURE_2D,material->texture);
+                } else { glDisable(GL_TEXTURE_2D);glDisable(GL_ALPHA_TEST); }
+                glBegin(GL_QUADS);
+                for (unsigned i=0;i<4;i++) {
+                    unsigned corner=corners[i];
+                    if (quad.textured) {
+                        glColor4f(quad.color[corner][0]/128.0f,quad.color[corner][1]/128.0f,quad.color[corner][2]/128.0f,1);
+                        glTexCoord2d((double)quad.uv[corner][0]/material->width,(double)quad.uv[corner][1]/material->height);
+                    } else glColor4ub(quad.color[corner][0],quad.color[corner][1],quad.color[corner][2],255);
+                    glVertex2sv(quad.position[corner]);
+                }
+                glEnd();
+            }
+    }
+    glDisable(GL_TEXTURE_2D);glDisable(GL_ALPHA_TEST);glDepthMask(GL_TRUE);glColor4ub(255,255,255,255);
+}
+
+static void abilene_render_pause(void)
+{
+    LL_PauseQuad quads[2];unsigned count=ll_native_pause_quads(&abilene_script.pause,quads);
+    if (!count) return;
+    glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,0);
+    for (unsigned i=0;i<count;i++) {
+        unsigned image=quads[i].image;LL_MenuTexture *texture=&abilene_pause_textures[image];
+        const LL_PcxImage *pcx=&abilene_script.pause.images[image];
+        if (!texture->loaded && !ll_menu_art_load_from_rgba(pcx->rgba_pixels,pcx->width,pcx->height,texture)) {
+            fprintf(stderr,"ERROR: cannot upload original pause texture%u\n",image);continue;
+        }
+        const int16_t *rectangle=quads[i].rectangle;
+        ll_menu_art_draw(texture,rectangle[0],rectangle[1],rectangle[2],rectangle[3]);
+    }
+    glDisable(GL_ALPHA_TEST);glColor4ub(255,255,255,255);
+}
+
+static int abilene_render_scene(void)
+{
+    const LL_LevelNativeSetup *camera=&abilene_script.native;
+    if (!abilene_script.loaded || !abilene_script.grid_loaded ||
+        !camera->camera_reference_active || !camera->camera_output_active || !camera->projection) return 0;
+    abilene_render_backgrounds();
+    double projection[16];ll_native_camera_projection((uint16_t)camera->projection,projection);
+    glMatrixMode(GL_PROJECTION);glLoadMatrixd(projection);
+    glMatrixMode(GL_MODELVIEW);glLoadIdentity();
+    glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LEQUAL);glDepthMask(GL_TRUE);
+    glClear(GL_DEPTH_BUFFER_BIT);glDisable(GL_CULL_FACE);glDisable(GL_BLEND);
+    int16_t view[3][3];int32_t translation[3];
+    ll_native_camera_view(camera->camera_view_pitch,camera->camera_view_yaw,
+        camera->camera_render_reference,camera->depth,view,translation);
+    for (unsigned i=0;i<abilene_script.bib.model_count;i++) {
+        const LL_Bib3dxModel *model=&abilene_script.bib.models[i];
+        if (model->type!=0 || !model->vertices) continue;
+        abilene_render_model(model,model->vertices,model->orientation,
+            abilene_script.model_poses[i].position,&view[0][0],translation,
+            &abilene_script.model_materials[i]);
+    }
+    for (unsigned i=0;i<260;i++) {
+        const LL_LevelScriptObject *object=&abilene_script.objects[i];
+        if (!object->present || !object->visible || object->kind!=1 || !object->pose ||
+            !object->root_rotation || object->model_index>=abilene_script.bib.model_count) continue;
+        if (!ll_level_script_model_presented(&abilene_script,i)) continue;
+        const LL_Bib3dxModel *model=&abilene_script.bib.models[object->model_index];
+        if (model->type!=1 || !model->vertices) continue;
+        const LL_BibVertex *vertices=abilene_animated_vertices(i);
+        if (!vertices) continue;
+        abilene_render_model(model,vertices,object->root_rotation,object->pose->position,
+            &view[0][0],translation,object->material);
+    }
+    for (unsigned i=0;i<260;i++) {
+        const LL_LevelScriptObject *sprite=&abilene_script.objects[i];
+        if (sprite->present && sprite->visible && sprite->kind==5)
+            abilene_render_world_sprite(sprite,&view[0][0],translation);
+    }
+    for (unsigned i=0;i<260;i++) {
+        const LL_LevelOrbitalGroup *group=&abilene_script.orbital_groups[i];
+        if (!group->sprites || !group->callback_registered || !group->native_byte_2) continue;
+        for (unsigned m=0;m<group->member_count;m++)
+            if (group->member_visible[m]) abilene_render_world_sprite(&group->sprites[m],&view[0][0],translation);
+    }
+    for (unsigned i=0;i<10 && abilene_script.projectiles.initialized;i++) {
+        const LL_LevelProjectile *slot=&abilene_script.projectiles.slots[i];
+        if (slot->flags) abilene_render_world_sprite(&slot->ball,&view[0][0],translation);
+        if (slot->flash_visible) abilene_render_world_sprite(&slot->flash,&view[0][0],translation);
+    }
+    glDisable(GL_TEXTURE_2D);glDisable(GL_ALPHA_TEST);glDisable(GL_DEPTH_TEST);
+    return 1;
+}
+
+static void abilene_render_screen_sprites(void)
+{
+    if (!abilene_script.loaded || !abilene_script.biz.valid) return;
+    glMatrixMode(GL_PROJECTION);glLoadIdentity();
+    glOrtho(0,640,480,0,-1,1);
+    glMatrixMode(GL_MODELVIEW);glLoadIdentity();
+    glDisable(GL_DEPTH_TEST);glEnable(GL_TEXTURE_2D);
+    glEnable(GL_ALPHA_TEST);glAlphaFunc(GL_GREATER,0);
+    glColor4ub(255,255,255,255);
+    for (unsigned i=0;i<260;i++) {
+        const LL_LevelScriptObject *sprite=&abilene_script.objects[i];
+        if (!sprite->present || sprite->kind!=7 || !sprite->visible ||
+            !sprite->sprite_primitives_present || !sprite->pose) continue;
+        int texture_changed=!abilene_sprite_texture_attempted[i] ||
+            abilene_sprite_texture_objects[i]!=sprite->biz_object;
+        if (texture_changed) {
+            if (abilene_sprite_textures[i]) glDeleteTextures(1,&abilene_sprite_textures[i]);
+            abilene_sprite_textures[i]=0;
+            abilene_sprite_texture_attempted[i]=1;
+            abilene_sprite_texture_objects[i]=sprite->biz_object;
+            LL_BizObject object;
+            unsigned char pixels[256*256*4];
+            uint32_t width,height;
+            if (!ll_biz_get_object(&abilene_script.biz,sprite->biz_object,&object) ||
+                !ll_biz_decode_sprite(&abilene_script.biz,object.sprite_index,object.tile_index,
+                    pixels,sizeof(pixels),&width,&height) || width<=2 || height<=2) {
+                fprintf(stderr,"ERROR: cannot decode Abilene screen sprite instance%u BIZ object%u\n",i,sprite->biz_object);
+                continue;
+            }
+            GLuint texture;
+            glGenTextures(1,&texture);glBindTexture(GL_TEXTURE_2D,texture);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+            glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,(GLsizei)width,(GLsizei)height,0,
+                GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+            abilene_sprite_textures[i]=texture;
+            abilene_sprite_texture_sizes[i][0]=width;
+            abilene_sprite_texture_sizes[i][1]=height;
+        }
+        if (!abilene_sprite_textures[i]) continue;
+        glBindTexture(GL_TEXTURE_2D,abilene_sprite_textures[i]);
+        uint32_t width=abilene_sprite_texture_sizes[i][0];
+        uint32_t height=abilene_sprite_texture_sizes[i][1];
+        double sx=sprite->sprite_scale/16.0*640.0/512.0;
+        double sy=sprite->sprite_scale/16.0*480.0/256.0;
+        double x=sprite->pose->position[0]+sprite->sprite_offset[0]*sx;
+        double y=sprite->pose->position[1]+sprite->sprite_offset[1]*sy;
+        double w=(width-2)*sx,h=(height-2)*sy;
+        if (texture_changed && getenv("LL_TRACE_LEVEL_SOOL"))
+            fprintf(stderr,"TRACE: ABILENE screen instance%u object%u root[%d,%d,%d] offset[%d,%d] scale%d texture%ux%u rectangle[%.3f,%.3f,%.3f,%.3f]\n",
+                i,sprite->biz_object,sprite->pose->position[0],sprite->pose->position[1],
+                sprite->pose->position[2],sprite->sprite_offset[0],sprite->sprite_offset[1],
+                sprite->sprite_scale,width,height,x,y,w,h);
+        double u=1.0/width,v=1.0/height;
+        glBegin(GL_QUADS);
+        glTexCoord2d(u,v);glVertex2d(x,y);
+        glTexCoord2d(1-u,v);glVertex2d(x+w,y);
+        glTexCoord2d(1-u,1-v);glVertex2d(x+w,y+h);
+        glTexCoord2d(u,1-v);glVertex2d(x,y+h);
+        glEnd();
+    }
+    glDisable(GL_TEXTURE_2D);glDisable(GL_ALPHA_TEST);
 }
 
 static void menu_render_sprite_groups(void)
@@ -2617,11 +2953,22 @@ static void render_menu(int selection, int page, unsigned int tick)
 
 static void enter_abilene(void)
 {
-    requested_game_state=0;
+    abilene_audio_shutdown();
+    abilene_clear_sprite_textures();
+    requested_game_state=0;scene_load_failed=0;
     menu_audio_shutdown();
     game_state=2;
     ll_level_set_state(&game_level,2);
     load_abilene_assets();
+}
+
+static void leave_abilene(void)
+{
+    abilene_audio_shutdown();abilene_clear_sprite_textures();
+    menu_control_profile=abilene_script.native.control_profile;
+    game_state=1;ll_level_script_close(&abilene_script);
+    scene_load_failed=0;
+    ll_level_set_state(&game_level,1);load_menu_bib();menu_audio_init();restart_menu_scene();
 }
 
 int main(void)
@@ -2717,19 +3064,11 @@ int main(void)
                 running = 0;
                 break;
             case SDL_KEYDOWN:
-                if (game_state == 2 && event.key.keysym.sym == SDLK_ESCAPE) {
-                    game_state = 1;
-                    selection = 0;
-                    page = 0;
-                    ll_level_script_close(&abilene_script);
-                    free(abilene_cod_data);abilene_cod_data=NULL;
-                    ll_level_set_state(&game_level, 1);
-                    load_menu_bib();
-                    menu_audio_init();
-                    restart_menu_scene();
-                } else if (game_state == 2) {
-                    /* Native input variables remain explicitly unsupported;
-                     * do not drive the unrelated procedural player instead. */
+                if (native_scene_active()) {
+                    if ((!abilene_script.pause.registered || scene_load_failed) && event.key.keysym.sym==SDLK_ESCAPE) {
+                        leave_abilene();selection=0;page=0;
+                    }
+                    /* Original pause/exit and controller inputs are polled at24 Hz. */
                 } else if (game_state == 1 && menu_program_loaded) {
                     /* Original menu input is consumed by SOOL's native
                      * keyboard/action queries during the script update. */
@@ -2810,30 +3149,62 @@ int main(void)
             }
         }
 
-        if (game_state == 2) {
+        if (native_scene_active()) {
             uint32_t now=SDL_GetTicks();
             uint32_t step=(uint32_t)((uint64_t)now*24u/1000u);
             if (step!=abilene_script_tick) {
+                if (abilene_audio_device) SDL_LockAudioDevice(abilene_audio_device);
+                ll_level_script_set_input(&abilene_script,read_native_actions());
+                const Uint8 *keys=SDL_GetKeyboardState(NULL);
+                ll_level_script_set_system_input(&abilene_script,
+                    (keys[SDL_SCANCODE_P]?LL_PAUSE_KEY:0)|(keys[SDL_SCANCODE_ESCAPE]?LL_PAUSE_EXIT_KEY:0));
                 ll_level_script_update(&abilene_script);
+                if (abilene_audio_device) SDL_UnlockAudioDevice(abilene_audio_device);
                 abilene_script_tick=step;
+            }
+            if (abilene_script.pause.exit_requested) {
+                leave_abilene();selection=0;page=0;continue;
+            }
+            if (abilene_script.scene_requested && !scene_load_failed) {
+                unsigned target=abilene_script.requested_scene?abilene_script.requested_scene:(unsigned)game_state;
+                if (target==1) { leave_abilene();selection=0;page=0;continue; }
+                abilene_audio_shutdown();abilene_clear_sprite_textures();
+                if (load_native_scene(target)) {
+                    game_state=(int)target;ll_level_set_state(&game_level,(int)target);
+                    continue;
+                }
+                scene_load_failed=1;
+                /* The old scene remains owned; Esc can leave if reload failed with pause disabled. */
+                abilene_audio_init();
             }
             /* Clear letterbox bands too; the PCX presenter fits its source
              * aspect ratio and must not expose the previous menu frame. */
             glClearColor(0.025f,0.025f,0.04f,1);
             glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
-            ll_level_render(&game_level);
+            if (!abilene_render_scene()) ll_level_render(&game_level);
             glDisable(GL_TEXTURE_2D);glDisable(GL_DEPTH_TEST);
             glMatrixMode(GL_PROJECTION);glLoadIdentity();
             glOrtho(0,WINDOW_WIDTH,WINDOW_HEIGHT,0,-1,1);
             glMatrixMode(GL_MODELVIEW);glLoadIdentity();
-            draw_text("ABILENE SOOL",12,12,2,1,1,1);
+            abilene_render_screen_sprites();
+            draw_text(game_state==3?"ABI_BOSS SOOL":"ABILENE SOOL",12,12,2,1,1,1);
             char status[96];
             snprintf(status,sizeof(status),"%u FUNCTIONS  %u MODELS  %u BLOCKED",
                 abilene_script.program.function_count,abilene_script.object_count,
-                abilene_script.blocked_count);
+                abilene_script.blocked_count+(unsigned)abilene_script.player.blocked+(unsigned)abilene_script.native.camera_blocked+
+                    abilene_script.native.collision_blocked_count);
             draw_text(status,12,36,1,1,1,1);
             draw_text(abilene_script.loaded?"NATIVE GAMEPLAY INCOMPLETE  SEE LOG":"SCRIPT LOAD FAILED  SEE LOG",
                 12,52,1,1,0.8f,0.3f);
+            if (abilene_script.native.fade_alpha) {
+                glDisable(GL_TEXTURE_2D);glDisable(GL_ALPHA_TEST);
+                glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                glColor4ub(0,0,0,abilene_script.native.fade_alpha);
+                glBegin(GL_QUADS);
+                glVertex2i(0,0);glVertex2i(640,0);glVertex2i(640,480);glVertex2i(0,480);
+                glEnd();glDisable(GL_BLEND);glColor4ub(255,255,255,255);
+            }
+            abilene_render_pause();
         } else {
             update_menu_scripts(SDL_GetTicks());
             render_menu(selection, page, SDL_GetTicks());
@@ -2851,6 +3222,7 @@ int main(void)
         free(menu_neutral_vertices[i]);free(menu_animation_evaluated[i]);free(menu_animation_initial[i]);
     }
     ll_level_destroy(&game_level);
+    abilene_audio_shutdown();
     ll_level_script_close(&abilene_script);
     free(menu_bib_data);
     for (unsigned patch = 0; patch < 12; patch++)
@@ -2865,9 +3237,9 @@ int main(void)
     ll_sool_program_close(&menu_program);
     free(menu_script_contexts);
     free(menu_script_data);
-    free(abilene_cod_data);
     free(abilene_archive_data);
     free(fixgfx_archive_data);
+    abilene_clear_sprite_textures();
     SDL_GL_DeleteContext(context);
     SDL_DestroyWindow(window);
     SDL_Quit();

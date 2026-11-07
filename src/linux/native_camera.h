@@ -5,6 +5,23 @@
 /* Native signed-angle lookup; angles use 4096 units per revolution. */
 int16_t ll_native_sine(int16_t angle);
 int16_t ll_native_cosine(int16_t angle);
+/* FUN_004836a0 atan2 conversion, original constants and truncation to16 bits. */
+int16_t ll_native_angle(int32_t a, int32_t b);
+typedef struct {
+    int16_t delta[3], length, distance, yaw, pitch;
+    int32_t origin[3];
+} LL_NativePathSegmentState;
+/* FUN_004562f0 segment reset; narrows differences/length before angle math. */
+void ll_native_path_segment_reset(const int32_t start[3], const int32_t end[3],
+                                   uint32_t length, LL_NativePathSegmentState *out);
+/* FUN_0047c470: recover yaw from matrix coefficients0 and2. Reject scaled
+ * coefficients outside the inverse-trigonometric domain; output unchanged. */
+int ll_native_model_yaw(const int16_t *matrix, int16_t *yaw);
+/* FUN_00408440/FUN_00407700 decision. changed/converged are booleans;
+ * next_yaw is meaningful when changed. Invalid matrix leaves outputs intact. */
+int ll_native_turn_towards(const int16_t *matrix, const int32_t source[3],
+                           const int32_t target[3], uint16_t cone, int16_t step,
+                           int16_t *next_yaw, int *changed, int *converged);
 /* FUN_0047c630: distinct post-initialization model/part rotation table. */
 void ll_native_model_rotation(const int32_t angles[3], int16_t rows[3][3]);
 /* Row-major 3x3 composition, aliases allowed; native 32-bit sums and

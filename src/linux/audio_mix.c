@@ -41,7 +41,7 @@ int ll_audio_mix_gains(const LL_AudioMixer *mixer, uint16_t volume,
 uint16_t ll_audio_mix_play(LL_AudioMixer *mixer, const int16_t *pcm,
                            size_t count, uint32_t step, const uint16_t gains[2])
 {
-    if (!mixer || !pcm || !count || !step || !gains) return 0;
+    if (!mixer || !pcm || !count || !gains) return 0;
     for (unsigned offset=0;offset<64;offset++) {
         unsigned slot=(mixer->next_voice+offset)%64;
         LL_AudioVoice *voice=&mixer->voices[slot];

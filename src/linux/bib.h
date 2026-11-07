@@ -115,6 +115,8 @@ typedef struct {
     uint32_t group_count;
     LL_BibGeometryGroup *groups;
     int16_t orientation[9];         /* 12-bit fixed point basis at +0x7c */
+    int32_t color_multiplier;       /* Native descriptor+0x54. */
+    int16_t root_rotation[9];       /* Mutable rotation initial value at +0x5c. */
     int32_t anchor[3];              /* descriptor XYZ at +0x90..+0x98 */
     int32_t bounds_min[3];          /* descriptor +0xa4..+0xac */
     int32_t bounds_max[3];          /* descriptor +0xb0..+0xb8 */
@@ -166,6 +168,45 @@ int ll_bib_get_selector_offset(const LL_BibFile *bib, uint32_t selector,
                                uint32_t *out_offset);
 int ll_bib_get_selector(const LL_BibFile *bib, uint32_t selector,
                         LL_BibSelector *out_selector);
+typedef struct {
+    uint16_t type, record_count;
+    const unsigned char *table, *payload;
+    size_t table_size, payload_size;
+} LL_BibPathView;
+/* FUN_00456f30 layout, kept as immutable bytes rather than relocated pointers.
+ * Validates the variable table and relative references; output unchanged on failure. */
+int ll_bib_get_path_view(const LL_BibFile *bib, uint32_t selector,
+                         LL_BibPathView *out);
+typedef struct {
+    uint32_t flags, length;
+    int32_t start[3], end[3];
+    uint16_t link_count;
+    uint32_t start_reference, end_reference; /* Payload-relative endpoint identity. */
+    uint32_t table_offset; /* Record identity within this path's table. */
+} LL_BibPathSegment;
+int ll_bib_get_path_segment(const LL_BibFile *bib, uint32_t selector,
+                            unsigned index, LL_BibPathSegment *out);
+/* Resolve a segment's relative link to a segment index. Rejects references
+ * into the middle of a record; output remains unchanged on failure. */
+int ll_bib_get_path_link(const LL_BibFile *bib, uint32_t selector,
+                         unsigned segment, unsigned link, unsigned *target);
+/* FUN_00457920 integer projection. Rejects degenerate segments and native
+ * signed-division overflow; outputs remain unchanged on failure. */
+int ll_bib_project_path_segment(const LL_BibPathSegment *segment,
+                                const int32_t position[3], int32_t projected[3],
+                                int32_t *distance);
+/* Native nearest admissible projection, first segment fallback, strict tie
+ * ordering and32-bit squared-distance wrapping. */
+int ll_bib_select_path_segment(const LL_BibFile *bib, uint32_t selector,
+                               const int32_t position[3], unsigned *index);
+typedef struct {
+    unsigned segment_index;
+    int16_t distance;
+    int32_t position[3];
+} LL_BibPathAnchor;
+/* Initial position/distance portion of FUN_00457740. Keeps the incoming Y. */
+int ll_bib_prepare_path_anchor(const LL_BibFile *bib, uint32_t selector,
+                               const int32_t position[3], LL_BibPathAnchor *out);
 /* Borrow a directory-indexed record, bounded by the next distinct offset or
  * section end. Outputs are cleared on failure; lifetime matches the BIB. */
 int ll_bib_get_indexed_record(const LL_BibFile *bib, uint32_t selector,

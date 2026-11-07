@@ -553,7 +553,11 @@ static int parse_3dx_catalogue(LL_BibFile *bib)
         model->parent_model_index = UINT32_MAX;
         model->type = data[model->descriptor_offset + 1];
         model->element_count = read_u32le(data + model->descriptor_offset + 0x2c);
+        model->color_multiplier = read_i32le(data + model->descriptor_offset + 0x54);
         for (uint32_t axis = 0; axis < 3; axis++) {
+            for (unsigned column=0;column<3;column++)
+                model->root_rotation[axis*3+column]=read_i16le(data+
+                    model->descriptor_offset+0x5c+axis*6u+column*2u);
             model->orientation[axis * 3] = read_i16le(data + model->descriptor_offset + 0x7c + axis * 6u);
             model->orientation[axis * 3 + 1] = read_i16le(data + model->descriptor_offset + 0x7e + axis * 6u);
             model->orientation[axis * 3 + 2] = read_i16le(data + model->descriptor_offset + 0x80 + axis * 6u);
@@ -699,6 +703,174 @@ int ll_bib_get_selector(const LL_BibFile *bib, uint32_t selector,
     if (!ll_bib_is_valid(bib) || selector >= bib->selector_count || out_selector == NULL)
         return 0;
     *out_selector = bib->sections[selector];
+    return 1;
+}
+
+int ll_bib_get_path_view(const LL_BibFile *bib, uint32_t selector,
+                         LL_BibPathView *out)
+{
+    LL_BibSelector section;
+    if (!out || !ll_bib_get_selector(bib,selector,&section) ||
+        !section.is_section || section.size<8 ||
+        !range_is_valid(bib->raw_size,section.offset,section.size)) return 0;
+    const unsigned char *header=bib->raw_data+section.offset;
+    size_t table_size=read_u32le(header+4);
+    if (table_size>section.size-8u) return 0;
+    LL_BibPathView view={read_u16le(header),read_u16le(header+2),
+        header+8,header+8+table_size,table_size,section.size-8u-table_size};
+    size_t cursor=0;
+    for (unsigned i=0;i<view.record_count;i++) {
+        if (cursor>table_size || table_size-cursor<20) return 0;
+        const unsigned char *record=view.table+cursor;
+        if (read_u32le(record+4)>view.payload_size ||
+            read_u32le(record+8)>view.payload_size) return 0;
+        uint32_t links=read_u32le(record+16);
+        /* The relocation loop uses16 bits but segment traversal uses the
+         * complete32-bit field. Reject inconsistent counts rather than
+         * accepting a table the native walker would traverse differently. */
+        if (links>UINT16_MAX) return 0;
+        cursor+=20;
+        if (links>(table_size-cursor)/4u) return 0;
+        for (unsigned link=0;link<links;link++)
+            if (read_u32le(view.table+cursor+4u*link)>=table_size) return 0;
+        cursor+=4u*links;
+    }
+    *out=view;
+    return 1;
+}
+
+int ll_bib_get_path_segment(const LL_BibFile *bib, uint32_t selector,
+                            unsigned index, LL_BibPathSegment *out)
+{
+    LL_BibPathView view;
+    if (!out || !ll_bib_get_path_view(bib,selector,&view) ||
+        index>=view.record_count) return 0;
+    size_t cursor=0;
+    for (unsigned i=0;i<index;i++)
+        cursor+=20u+4u*read_u32le(view.table+cursor+16);
+    const unsigned char *record=view.table+cursor;
+    size_t first=read_u32le(record+4),last=read_u32le(record+8);
+    if (view.payload_size-first<12 || view.payload_size-last<12) return 0;
+    LL_BibPathSegment segment={0};
+    segment.flags=read_u32le(record);segment.length=read_u32le(record+12);
+    segment.start_reference=(uint32_t)first;segment.end_reference=(uint32_t)last;
+    segment.table_offset=(uint32_t)cursor;
+    segment.link_count=read_u16le(record+16);
+    for (unsigned axis=0;axis<3;axis++) {
+        segment.start[axis]=read_i32le(view.payload+first+axis*4u);
+        segment.end[axis]=read_i32le(view.payload+last+axis*4u);
+    }
+    *out=segment;
+    return 1;
+}
+
+int ll_bib_get_path_link(const LL_BibFile *bib, uint32_t selector,
+                         unsigned segment, unsigned link, unsigned *target)
+{
+    LL_BibPathView view;
+    if (!target || !ll_bib_get_path_view(bib,selector,&view) ||
+        segment>=view.record_count) return 0;
+    size_t cursor=0;
+    for (unsigned i=0;i<segment;i++)
+        cursor+=20u+4u*read_u32le(view.table+cursor+16);
+    uint32_t count=read_u32le(view.table+cursor+16);
+    if (link>=count) return 0;
+    uint32_t relative=read_u32le(view.table+cursor+20u+4u*link);
+    cursor=0;
+    for (unsigned i=0;i<view.record_count;i++) {
+        if (cursor==relative) { *target=i;return 1; }
+        cursor+=20u+4u*read_u32le(view.table+cursor+16);
+    }
+    return 0;
+}
+
+static int32_t path_signed_word(uint32_t word)
+{
+    int32_t value;
+    memcpy(&value,&word,sizeof(value));
+    return value;
+}
+
+int ll_bib_project_path_segment(const LL_BibPathSegment *segment,
+                                const int32_t position[3], int32_t projected[3],
+                                int32_t *distance)
+{
+    if (!segment || !position || !projected || !distance) return 0;
+    int32_t delta[3],relative[3];
+    for (unsigned axis=0;axis<3;axis++) {
+        uint16_t word=(uint16_t)((uint32_t)segment->end[axis]-(uint32_t)segment->start[axis]);
+        delta[axis]=word<0x8000u?(int32_t)word:(int32_t)word-65536;
+        relative[axis]=path_signed_word((uint32_t)position[axis]-(uint32_t)segment->start[axis]);
+    }
+    unsigned axis=(delta[0]<0?-delta[0]:delta[0])>
+        (delta[2]<0?-delta[2]:delta[2])?0u:2u;
+    int32_t length=(int32_t)(segment->length&0xffffu);
+    if (length>=32768) length-=65536;
+    if (!delta[axis] || !length) return 0;
+    int32_t product=path_signed_word((uint32_t)relative[axis]*(uint32_t)length);
+    int64_t quotient=(int64_t)product/delta[axis];
+    if (quotient<INT32_MIN || quotient>INT32_MAX) return 0;
+    int32_t along=(int32_t)quotient;
+    int32_t shifted=path_signed_word((uint32_t)along<<16);
+    quotient=(int64_t)shifted/length;
+    if (quotient<INT32_MIN || quotient>INT32_MAX) return 0;
+    int32_t factor=(int32_t)quotient,output[3];
+    for (unsigned i=0;i<3;i++) {
+        int32_t scaled=path_signed_word((uint32_t)delta[i]*(uint32_t)factor);
+        /* x86 sar16 rounds negative values downward. */
+        int32_t offset=scaled>=0?scaled/65536:(int32_t)(-((-(int64_t)scaled+65535)/65536));
+        if (i==axis) offset=relative[i];
+        output[i]=path_signed_word((uint32_t)segment->start[i]+(uint32_t)offset);
+    }
+    memcpy(projected,output,sizeof(output));*distance=along;
+    return 1;
+}
+
+int ll_bib_select_path_segment(const LL_BibFile *bib, uint32_t selector,
+                               const int32_t position[3], unsigned *index)
+{
+    LL_BibPathView view;
+    if (!position || !index || !ll_bib_get_path_view(bib,selector,&view) ||
+        !view.record_count) return 0;
+    unsigned selected=0;
+    uint32_t closest=UINT32_MAX;
+    for (unsigned i=0;i<view.record_count;i++) {
+        LL_BibPathSegment segment;
+        int32_t projected[3],along;
+        if (!ll_bib_get_path_segment(bib,selector,i,&segment) ||
+            !ll_bib_project_path_segment(&segment,position,projected,&along)) return 0;
+        if (along<0 || along>path_signed_word(segment.length)) continue;
+        uint32_t distance=0;
+        for (unsigned axis=0;axis<3;axis++) {
+            uint32_t difference=(uint32_t)projected[axis]-(uint32_t)position[axis];
+            distance+=difference*difference;
+        }
+        if (distance<closest) { closest=distance;selected=i; }
+    }
+    *index=selected;
+    return 1;
+}
+
+int ll_bib_prepare_path_anchor(const LL_BibFile *bib, uint32_t selector,
+                               const int32_t position[3], LL_BibPathAnchor *out)
+{
+    LL_BibPathAnchor anchor;
+    LL_BibPathSegment segment;
+    int32_t distance;
+    if (!out || !ll_bib_select_path_segment(bib,selector,position,&anchor.segment_index) ||
+        !ll_bib_get_path_segment(bib,selector,anchor.segment_index,&segment) ||
+        !ll_bib_project_path_segment(&segment,position,anchor.position,&distance)) return 0;
+    int32_t signed_distance=(int32_t)((uint32_t)distance&0xffffu);
+    int32_t length=(int32_t)(segment.length&0xffffu);
+    if (signed_distance>=32768) signed_distance-=65536;
+    if (length>=32768) length-=65536;
+    if (signed_distance<0 || signed_distance>length) {
+        signed_distance=0;
+        memcpy(anchor.position,segment.start,sizeof(anchor.position));
+    }
+    anchor.distance=(int16_t)signed_distance;
+    anchor.position[1]=position[1];
+    *out=anchor;
     return 1;
 }
 

@@ -5,6 +5,35 @@
 
 int main(void)
 {
+    int16_t yaw_matrix[9]={4096,0,0},yaw;
+    assert(ll_native_model_yaw(yaw_matrix,&yaw) && yaw==0);
+    yaw_matrix[0]=0;yaw_matrix[2]=4096;
+    assert(ll_native_model_yaw(yaw_matrix,&yaw) && yaw==3073);
+    yaw_matrix[2]=-4096;
+    assert(ll_native_model_yaw(yaw_matrix,&yaw) && yaw==1023);
+    yaw_matrix[0]=-4096;yaw_matrix[2]=0;
+    assert(ll_native_model_yaw(yaw_matrix,&yaw) && yaw==2049);
+    yaw_matrix[0]=4097;yaw=123;
+    assert(!ll_native_model_yaw(yaw_matrix,&yaw) && yaw==123);
+    yaw_matrix[0]=4096;yaw_matrix[2]=0;
+    const int32_t turn_source[3]={0,0,0};
+    int32_t turn_target[3]={0,0,-1000};
+    int changed,converged;
+    assert(ll_native_turn_towards(yaw_matrix,turn_source,turn_target,512,50,
+        &yaw,&changed,&converged));
+    assert(changed && converged && yaw==0);
+    turn_target[0]=500;
+    assert(ll_native_turn_towards(yaw_matrix,turn_source,turn_target,512,50,
+        &yaw,&changed,&converged));
+    assert(changed && !converged && yaw==50);
+    turn_target[0]=10000;
+    assert(ll_native_turn_towards(yaw_matrix,turn_source,turn_target,2047,50,
+        &yaw,&changed,&converged));
+    assert(!changed && !converged);
+    turn_target[0]=0;turn_target[2]=0;
+    assert(ll_native_turn_towards(yaw_matrix,turn_source,turn_target,512,50,
+        &yaw,&changed,&converged));
+    assert(!changed && !converged);
     assert(ll_native_sine(0)==0 && ll_native_cosine(0)==4096);
     int16_t rotation[3][3];
     int16_t fractional[9]={-1,0,0,0,-4095,0,0,0,4096};
